@@ -58,25 +58,31 @@ export function useVoice() {
     }
   }, []);
 
-  const pauseListening = useCallback(() => {
-    voiceService.pauseListening();
+  const pauseListening = useCallback((submit = true) => {
+    voiceService.pauseListening(submit);
     setState(VoiceState.IDLE);
   }, []);
 
-  const speak = useCallback(async (text) => {
+  const speak = useCallback(async (text, onPlaybackStart = null) => {
     try {
-      await voiceService.speak(text);
+      setState(VoiceState.SPEAKING);
+      await voiceService.speak(text, "en-IN", onPlaybackStart);
+      setState(prev => prev === VoiceState.SPEAKING ? VoiceState.IDLE : prev);
     } catch (err) {
       console.error('TTS Error:', err);
+      setState(prev => prev === VoiceState.SPEAKING ? VoiceState.IDLE : prev);
     }
   }, []);
 
   const playSystemAudio = useCallback(async (type) => {
     try {
+      setState(VoiceState.SPEAKING);
       // Assuming hi-IN is default, can be dynamically linked to Language state later
       await voiceService.playSystemAudio(type, "hi-IN");
+      setState(prev => prev === VoiceState.SPEAKING ? VoiceState.IDLE : prev);
     } catch (err) {
       console.error('System Audio Error:', err);
+      setState(prev => prev === VoiceState.SPEAKING ? VoiceState.IDLE : prev);
     }
   }, []);
 

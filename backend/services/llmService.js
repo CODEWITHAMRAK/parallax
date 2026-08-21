@@ -12,14 +12,15 @@ Supported actions:
 - NAVIGATE_STEP: target (step id)
 - NEXT: Move to next step
 - PREVIOUS: Move to previous step
-- FILL_FIELD: field (field id), value
-- CLEAR_FIELD: field (field id)
-- SELECT_OPTION: field (field id), value
-- READ_FIELD: field (field id)
-- EXPLAIN_FIELD: field (field id)
+- FILL_FIELD: Use when successfully extracting form data. Put extracted data into 'filled_fields'.
+- CLEAR_FIELD: target (field id to clear, or 'all')
+- SELECT_OPTION: Use when extracting a dropdown selection. Put extracted data into 'filled_fields'.
+- READ_FIELD: target (field id)
+- EXPLAIN_FIELD: target (field id)
 - UPLOAD_DOCUMENT: field (field id)
 - SUBMIT
 - NAVIGATE_PAGE: target (page id, e.g. 'home', 'scholarship_form')
+- RESTART_FORM: Clears the entire form and starts over
 
 Context provided:
 ${JSON.stringify(context, null, 2)}
@@ -32,17 +33,20 @@ Instructions:
 5. If the user doesn't understand a field, use CHAT to explain it in one short sentence.
 6. When filling a field, briefly confirm what was recorded (e.g., "Got it. Name is John.") before asking for the next field.
 7. If the user asks to restart, briefly confirm if they want to delete progress.
+8. CRITICAL: NEVER output NEXT or NAVIGATE_STEP if any required fields in the current step are missing. If the user asks to go to the next step but fields are missing, you MUST refuse, output a CHAT action, and ask them to provide the missing required details first.
+9. CRITICAL: When extracting an email address from spoken text, meticulously format it. Convert words like "at" to "@" and "dot" to ".", remove all spaces, and output a valid email address (e.g., "john doe at gmail dot com" -> "johndoe@gmail.com").
 
 You MUST return ONLY valid JSON matching this exact schema:
 {
   "reasoning": "Brief verification...",
   "action": "ACTION_NAME",
-  "field": "optional_field",
-  "value": "optional_value",
-  "target": "optional_target",
+  "filled_fields": {
+    "optional_field_id": "extracted_value"
+  },
+  "target": "optional_target (e.g. for NAVIGATE_STEP, NAVIGATE_PAGE, CLEAR_FIELD)",
   "message": "Extremely brief conversational reply"
 }
-CRITICAL: For fields requiring specific formats (like "YYYY-MM-DD" for dates), you must format the JSON 'value' strictly as requested IF AND ONLY IF your reasoning concludes the information is 100% complete. If it is not, use CHAT instead. Your conversational 'message' MUST NEVER mention technical formats.`;
+CRITICAL: For fields requiring specific formats (like "YYYY-MM-DD" for dates), you must format the extracted value strictly as requested. If the user provides multiple pieces of information, extract ALL of them into the "filled_fields" object, even if your main action is CHAT (e.g. when you need to ask for clarification on one missing field). Your conversational 'message' MUST NEVER mention technical formats.`;
 
   try {
     const chatHistory = context.chat_history || [];

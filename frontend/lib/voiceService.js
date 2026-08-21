@@ -11,24 +11,33 @@ export class VoiceController {
 
     this.isListening = false;
     this.speechStarted = false;
+    this.isSpeaking = false;
+    this.shouldSubmit = true;
     this.silenceTimer = null;
     this.checkInterval = null;
 
     // Constants
-    this.MIN_DECIBELS = 5; // Conservative threshold (0-255 scale) to catch soft speech
-    this.INITIAL_SILENCE_DURATION = 4000; // 4s timeout if no speech is detected at all
-    this.SPEECH_COMPLETION_DURATION = 1500; // 1.5s of silence after speech triggers end
-    this.MAX_DURATION = 15000; // 15s hard stop
+    this.MIN_DECIBELS = 7; // Increased threshold to avoid triggering on background noise
+    this.INITIAL_SILENCE_DURATION = 8000; // 8s timeout if no speech is detected at all
+    this.SPEECH_COMPLETION_DURATION = 2500; // 2.5s of silence after speech triggers end
+    this.MAX_DURATION = 30000; // 30s hard stop
     this.maxTimer = null;
     this.initialSilenceTimer = null;
   }
 
   async startListening(onSpeechStartCallback = null, onSpeechEndCallback = null) {
+    if (this.isListening) return;
+    if (this.isSpeaking) {
+      console.warn("[VoiceService] Blocked startListening because AI is currently speaking.");
+      return;
+    }
+    
+    // Acquire lock immediately to prevent concurrent orphaned streams
+    this.isListening = true;
+    
     try {
-      if (this.isListening) return;
-
       this.stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: false }
       });
 
       this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
@@ -49,9 +58,11 @@ export class VoiceController {
 
       this.mediaRecorder.onstop = () => {
         const audioBlob = new Blob(this.audioChunks, { type: 'audio/webm' });
+        const process = this.shouldSubmit !== false;
+        this.shouldSubmit = true; // reset
         this.audioChunks = [];
         this.cleanup();
-        if (onSpeechEndCallback) onSpeechEndCallback(audioBlob);
+        if (process && onSpeechEndCallback) onSpeechEndCallback(audioBlob);
       };
 
       this.mediaRecorder.start();
@@ -113,14 +124,16 @@ export class VoiceController {
       }, 100);
 
     } catch (error) {
+      this.isListening = false;
       console.error("Microphone permission denied or VAD error:", error);
       throw new Error("Microphone access is required for voice interaction.");
     }
   }
 
-  pauseListening() {
+  pauseListening(submit = true) {
     this.isListening = false;
     if (this.mediaRecorder && this.mediaRecorder.state !== "inactive") {
+      this.shouldSubmit = submit;
       this.mediaRecorder.stop();
     } else {
       this.cleanup();
@@ -169,39 +182,56 @@ export class VoiceController {
     return data.text;
   }
 
-  async speak(text, languageCode = "en-IN") {
+  async speak(text, languageCode = "en-IN", onPlaybackStart = null) {
+    this.isSpeaking = true;
     this.stopSpeaking();
-    this.pauseListening(); // Ensure microphone is off while TTS plays to avoid echoes
+    this.pauseListening(false); // Ensure microphone is off while TTS plays to avoid echoes, and don't submit noise
 
-    const response = await fetch(`${API_URL}/api/voice/speak`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text, languageCode }),
-    });
+    try {
+      const response = await fetch(`${API_URL}/api/voice/speak`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, languageCode }),
+      });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(errorText || "Failed to synthesize speech");
+      if (!response.ok) {
+        const errorText = await response.text();
+        this.isSpeaking = false;
+        throw new Error(errorText || "Failed to synthesize speech");
+      }
+
+      const data = await response.json();
+      const audioContent = data.audio;
+
+      const audioBlob = new Blob(
+        [Uint8Array.from(atob(audioContent), (c) => c.charCodeAt(0))],
+        { type: "audio/wav" }
+      );
+      const audioUrl = URL.createObjectURL(audioBlob);
+
+      return new Promise((resolve, reject) => {
+        this.audioElement = new Audio(audioUrl);
+        this.audioElement.onplay = () => {
+          if (onPlaybackStart) onPlaybackStart();
+        };
+        this.audioElement.onended = () => {
+          URL.revokeObjectURL(audioUrl);
+          this.isSpeaking = false;
+          resolve();
+        };
+        this.audioElement.onerror = (err) => {
+          this.isSpeaking = false;
+          reject(err);
+        };
+        this.audioElement.play().catch((err) => {
+          this.isSpeaking = false;
+          reject(err);
+        });
+      });
+    } catch (e) {
+      this.isSpeaking = false;
+      throw e;
     }
-
-    const data = await response.json();
-    const audioContent = data.audio;
-
-    const audioBlob = new Blob(
-      [Uint8Array.from(atob(audioContent), (c) => c.charCodeAt(0))],
-      { type: "audio/wav" }
-    );
-    const audioUrl = URL.createObjectURL(audioBlob);
-
-    return new Promise((resolve, reject) => {
-      this.audioElement = new Audio(audioUrl);
-      this.audioElement.onended = () => {
-        URL.revokeObjectURL(audioUrl);
-        resolve();
-      };
-      this.audioElement.onerror = reject;
-      this.audioElement.play().catch(reject);
-    });
   }
 
   playSystemAudio(type, langCode = "en-IN") {
@@ -209,13 +239,15 @@ export class VoiceController {
     const validLang = supportedLangs.includes(langCode) ? langCode : "en-IN";
 
     return new Promise((resolve, reject) => {
+      this.isSpeaking = true;
       this.stopSpeaking();
-      this.pauseListening();
+      this.pauseListening(false); // Don't submit ambient noise when interrupting with system audio
       
       const audioSource = `/audio/system/${validLang}/${type}.wav`;
       this.audioElement = new Audio(audioSource);
       
       this.audioElement.onended = () => {
+        this.isSpeaking = false;
         resolve();
       };
       
@@ -226,10 +258,14 @@ export class VoiceController {
         if (type === "are_you_there") fallbackText = "Are you still there?";
         if (type === "network_error") fallbackText = "I'm having trouble connecting.";
         
+        this.isSpeaking = false;
         this.speak(fallbackText, validLang).then(resolve).catch(reject);
       };
 
-      this.audioElement.play().catch(reject);
+      this.audioElement.play().catch((err) => {
+        this.isSpeaking = false;
+        reject(err);
+      });
     });
   }
 
@@ -238,6 +274,11 @@ export class VoiceController {
       this.audioElement.pause();
       this.audioElement = null;
     }
+  }
+
+  forceStopSpeaking() {
+    this.isSpeaking = false;
+    this.stopSpeaking();
   }
 }
 

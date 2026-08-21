@@ -8,6 +8,7 @@ import { executeAction } from "../lib/actionDispatcher.js";
 import { useRouter } from "next/navigation";
 import { Button } from "./ui/button.jsx";
 import { useVoice, VoiceState } from "../hooks/useVoice.js";
+import { voiceService } from "../lib/voiceService.js";
 
 // Simple inline SVG icons to avoid dependency issues
 const MicIcon = () => (
@@ -67,11 +68,30 @@ export default function TextNavigationUI({ inline = false }) {
     } = useVoice();
 
     const noResponseTimerRef = useRef(null);
+    const isTimeoutRef = useRef(false);
+
+    useEffect(() => {
+        const handleStartVoice = () => {
+            const currentMode = document.getElementById('interaction-mode-indicator')?.dataset?.mode;
+            if (currentMode === 'voice') {
+                startVoiceTurn();
+            }
+        };
+        window.addEventListener('start-voice-turn', handleStartVoice);
+        return () => window.removeEventListener('start-voice-turn', handleStartVoice);
+    }, []);
 
     const startVoiceTurn = async () => {
         console.log("[TextNavUI Debug] startVoiceTurn called.");
+        if (voiceService.isSpeaking) {
+            console.log("[TextNavUI Debug] AI is currently speaking (or preparing to speak), aborting startVoiceTurn to prevent interruption.");
+            return;
+        }
+
         if (noResponseTimerRef.current)
             clearTimeout(noResponseTimerRef.current);
+            
+        isTimeoutRef.current = false;
 
         await startListening(
             // onSpeechEndCallback (receives transcribed text directly!)
@@ -79,6 +99,12 @@ export default function TextNavigationUI({ inline = false }) {
                 console.log("[TextNavUI Debug] onSpeechEndCallback fired from VAD!");
                 if (noResponseTimerRef.current)
                     clearTimeout(noResponseTimerRef.current);
+                    
+                if (isTimeoutRef.current) {
+                    console.log("[TextNavUI Debug] Ignoring VAD end because of 8s timeout.");
+                    return;
+                }
+                
                 if (transcribed) {
                     console.log(
                         `[TextNavUI Debug] Processing transcribed text: "${transcribed}"`,
@@ -89,9 +115,10 @@ export default function TextNavigationUI({ inline = false }) {
                     console.warn(
                         "[TextNavUI Debug] Transcription failed or returned empty. Prompting user to repeat.",
                     );
+                    useNavigationStore.getState().setSystemMessage("Sorry, I didn't catch that. Could you please repeat?");
                     await playSystemAudio("didnt_catch");
                     const currentMode = document.getElementById('interaction-mode-indicator')?.dataset?.mode;
-                    if (currentMode === 'voice') startVoiceTurn();
+                    if (currentMode === 'voice') window.dispatchEvent(new Event('start-voice-turn'));
                 }
             },
             // onSpeechStart
@@ -105,37 +132,37 @@ export default function TextNavigationUI({ inline = false }) {
         );
 
         noResponseTimerRef.current = setTimeout(async () => {
-            console.log("[TextNavUI Debug] 5s no-response timer fired!");
+            console.log("[TextNavUI Debug] 8s no-response timer fired!");
+            isTimeoutRef.current = true;
             pauseListening(); // Manually pause the VAD because it never heard anything
 
             console.log("[TextNavUI Debug] Prompting 'Are you still there?'");
+            useNavigationStore.getState().setSystemMessage("Are you still there? Please say something or tap the mic.");
             await playSystemAudio("are_you_there");
             const currentMode = document.getElementById('interaction-mode-indicator')?.dataset?.mode;
-            if (currentMode === 'voice') startVoiceTurn();
-        }, 5000);
+            if (currentMode === 'voice') window.dispatchEvent(new Event('start-voice-turn'));
+        }, 12000);
     };
 
     const processInput = async (textToProcess) => {
         if (!textToProcess.trim()) return;
 
-        useNavigationStore
-            .getState()
-            .addMessageToHistory(currentStepIndex, "user", textToProcess);
+        const navState = useNavigationStore.getState();
+        const formState = useFormStore.getState();
+
+        navState.addMessageToHistory(navState.currentStepIndex, "user", textToProcess);
         setLoading(true);
 
         try {
-            const currentStep = schema ? schema.steps[currentStepIndex] : null;
+            const currentStep = formState.schema ? formState.schema.steps[navState.currentStepIndex] : null;
             const currentField = currentStep
-                ? currentStep.fields.find((f) => f.id === currentFieldId)
+                ? currentStep.fields.find((f) => f.id === navState.currentFieldId)
                 : null;
 
             const context = {
-                chat_history:
-                    useNavigationStore.getState().stepHistory[
-                        currentStepIndex
-                    ] || [],
-                current_page: currentPage,
-                form_title: schema?.title,
+                chat_history: navState.stepHistory[navState.currentStepIndex] || [],
+                current_page: navState.currentPage,
+                form_title: formState.schema?.title,
                 current_step: currentStep
                     ? {
                           id: currentStep.id,
@@ -150,28 +177,42 @@ export default function TextNavigationUI({ inline = false }) {
                           type: currentField.type,
                       }
                     : null,
-                form_values: values,
-                available_steps: schema ? schema.steps.map((s) => s.id) : [],
+                form_values: formState.values,
+                available_steps: formState.schema ? formState.schema.steps.map((s) => s.id) : [],
             };
 
             const action = await fetchChatAction(textToProcess, context);
-            executeAction(action, router);
+            const currentMode = document.getElementById(
+                "interaction-mode-indicator",
+            )?.dataset?.mode;
 
-            // Explicitly speak only the LLM's direct conversational message
-            if (action.message) {
-                await speak(action.message);
-
-                // If in voice mode, automatically start listening again after speaking
-                // Use a 1500ms timeout to ensure speaker output completely finishes and echoes die down before mic activates
-                setTimeout(() => {
-                    // Check if we are still in voice mode
-                    const currentMode = document.getElementById(
-                        "interaction-mode-indicator",
-                    )?.dataset?.mode;
-                    if (currentMode === "voice") {
-                        startVoiceTurn();
+            // Explicitly speak only if in voice mode
+            if (action.message && currentMode === "voice") {
+                let playbackStarted = false;
+                speak(action.message, () => {
+                    playbackStarted = true;
+                    executeAction(action, router);
+                    setLoading(false);
+                }).then(() => {
+                    if (!playbackStarted) {
+                        // Fallback in case TTS failed or onplay never fired
+                        executeAction(action, router);
+                        setLoading(false);
                     }
-                }, 1500);
+                    
+                    // If in voice mode, automatically start listening again after speaking
+                    setTimeout(() => {
+                        const modeAfterSpeak = document.getElementById(
+                            "interaction-mode-indicator",
+                        )?.dataset?.mode;
+                        if (modeAfterSpeak === "voice") {
+                            startVoiceTurn();
+                        }
+                    }, 1500);
+                });
+            } else {
+                executeAction(action, router);
+                setLoading(false);
             }
 
             setInput("");
@@ -182,7 +223,6 @@ export default function TextNavigationUI({ inline = false }) {
                 .setSystemMessage(
                     "Sorry, I'm having trouble connecting right now.",
                 );
-        } finally {
             setLoading(false);
         }
     };
@@ -195,7 +235,12 @@ export default function TextNavigationUI({ inline = false }) {
     const handleVoiceAction = async () => {
         if (voiceState === VoiceState.LISTENING || voiceState === VoiceState.PREPARING) {
             if (noResponseTimerRef.current) clearTimeout(noResponseTimerRef.current);
-            pauseListening();
+            if (interactionMode === "voice") {
+                isTimeoutRef.current = true;
+                pauseListening(false);
+            } else {
+                pauseListening(true);
+            }
         } else if (voiceState === VoiceState.SPEAKING) {
             stopSpeaking();
             if (interactionMode === "voice") startVoiceTurn();
@@ -261,8 +306,8 @@ export default function TextNavigationUI({ inline = false }) {
                         className={`px-4 py-2 rounded-full font-bold transition-all ${interactionMode === "voice" ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:bg-muted/80"}`}
                     >
                         {interactionMode === "voice"
-                            ? "📞 Voice Call Mode"
-                            : "💬 Text Chat Mode"}
+                            ? "Voice Mode"
+                            : "Text Mode"}
                     </button>
 
                     <select
@@ -288,12 +333,12 @@ export default function TextNavigationUI({ inline = false }) {
                             {isPreparing
                                 ? "Warming up mic..."
                                 : isListening
-                                  ? "🎙 Listening... (Speak now)"
+                                  ? "Listening... (Speak now)"
                                   : isProcessing
                                     ? "Processing..."
                                     : isSpeaking
-                                      ? "🔊 Assistant Speaking..."
-                                      : "Call Paused. Tap mic to resume."}
+                                      ? "Assistant Speaking..."
+                                      : "Voice Paused. Tap mic to resume."}
                         </span>
                     </div>
                 )}
@@ -306,8 +351,8 @@ export default function TextNavigationUI({ inline = false }) {
                         </span>
                     </div>
                     <div className="flex-1 bg-muted rounded-2xl p-4 md:p-5 rounded-tl-sm text-foreground text-xl font-medium shadow-sm">
-                        {loading ? (
-                            <span className="animate-pulse">Loading...</span>
+                        {loading || isProcessing ? (
+                            <span className="animate-pulse">Processing...</span>
                         ) : systemMessage ? (
                             systemMessage
                         ) : (

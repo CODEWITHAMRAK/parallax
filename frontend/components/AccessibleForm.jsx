@@ -69,7 +69,14 @@ export default function AccessibleForm({ formId }) {
           const action = await fetchChatAction("I just entered this step. Please greet me and ask for the first missing field.", context);
           if (action.message) {
             setSystemMessage(action.message);
-            speak(action.message);
+            const currentMode = document.getElementById("interaction-mode-indicator")?.dataset?.mode;
+            if (currentMode === "voice") {
+              speak(action.message).then(() => {
+                setTimeout(() => {
+                  window.dispatchEvent(new Event('start-voice-turn'));
+                }, 1000);
+              });
+            }
           }
         } catch (e) {
           console.error("Failed to auto-fetch greeting", e);
@@ -123,7 +130,7 @@ export default function AccessibleForm({ formId }) {
                   <select
                     id={field.id}
                     value={values[field.id] || ""}
-                    readOnly
+                    onChange={(e) => useFormStore.getState().updateValue(field.id, e.target.value, true)}
                     className={`h-[64px] rounded-lg px-4 bg-input text-xl text-foreground border-b-2 outline-none transition-all ${
                       isFocused ? "border-primary border-2" : "border-border"
                     }`}
@@ -138,7 +145,7 @@ export default function AccessibleForm({ formId }) {
                     id={field.id}
                     type={field.type}
                     value={values[field.id] || ""}
-                    readOnly
+                    onChange={(e) => useFormStore.getState().updateValue(field.id, e.target.value, true)}
                     className={`h-[64px] rounded-lg px-4 bg-input text-xl text-foreground border-b-2 outline-none transition-all ${
                       isFocused ? "border-primary border-2" : "border-border"
                     }`}

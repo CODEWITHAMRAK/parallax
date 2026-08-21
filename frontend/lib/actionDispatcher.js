@@ -16,6 +16,26 @@ export const executeAction = (action, router) => {
 
   const { schema, values } = formStore;
 
+  // 1. Universally process any extracted fields, regardless of the main action
+  if (action.filled_fields && typeof action.filled_fields === 'object' && schema) {
+    Object.entries(action.filled_fields).forEach(([fieldId, value]) => {
+      let targetField = null;
+      for (const step of schema.steps) {
+        targetField = step.fields.find(f => f.id === fieldId);
+        if (targetField) break;
+      }
+      
+      if (targetField) {
+        const validation = validateField(targetField, value);
+        if (validation.valid) {
+          formStore.updateValue(fieldId, value, true);
+        } else {
+          console.warn(`[ActionDispatcher] Validation failed for ${fieldId}: ${validation.error}`);
+        }
+      }
+    });
+  }
+
   switch (action.action) {
     case 'CHAT':
       navStore.setSystemMessage(action.message || "I'm here to help.");
@@ -39,6 +59,22 @@ export const executeAction = (action, router) => {
       if (!schema) return navStore.setSystemMessage("No active form.");
       const stepIndex = schema.steps.findIndex(s => s.id === action.target);
       if (stepIndex !== -1) {
+        // Prevent jumping forward if current step has missing required fields
+        if (stepIndex > navStore.currentStepIndex) {
+          const currentStep = schema.steps[navStore.currentStepIndex];
+          let missingField = null;
+          for (const field of currentStep.fields) {
+            if (field.required && !values[field.id]) {
+              missingField = field;
+              break;
+            }
+          }
+          if (missingField) {
+            navStore.setSystemMessage(action.message || `Your ${missingField.label} is still missing. Please provide it before moving on.`);
+            break;
+          }
+        }
+        
         navStore.setStep(stepIndex);
         if (action.message) navStore.setSystemMessage(action.message);
       } else {
@@ -72,28 +108,18 @@ export const executeAction = (action, router) => {
 
     case ACTIONS.FILL_FIELD:
     case ACTIONS.SELECT_OPTION:
-      if (!schema) return;
-      let targetField = null;
-      for (const step of schema.steps) {
-        targetField = step.fields.find(f => f.id === action.field);
-        if (targetField) break;
-      }
-      if (targetField) {
-        const validation = validateField(targetField, action.value);
-        if (validation.valid) {
-          formStore.updateValue(action.field, action.value, true);
-          navStore.setSystemMessage(action.message || `Got it. Set ${targetField.label} to ${action.value}.`);
-        } else {
-          navStore.setSystemMessage(`Invalid value: ${validation.error}`);
-        }
-      } else {
-        navStore.setSystemMessage(action.message || "I couldn't find that field.");
-      }
+      // Values are already updated by the universal extractor above
+      navStore.setSystemMessage(action.message || "Got it. I've updated the form.");
       break;
 
     case ACTIONS.CLEAR_FIELD:
-      formStore.clearValue(action.field);
-      navStore.setSystemMessage(action.message || `Cleared the value for ${action.field}.`);
+      if (!action.target || action.target === 'all') {
+        formStore.resetForm();
+        navStore.setSystemMessage(action.message || "I have cleared all your details.");
+      } else {
+        formStore.clearValue(action.target);
+        navStore.setSystemMessage(action.message || `Cleared the value for ${action.target}.`);
+      }
       break;
 
     case ACTIONS.EXPLAIN_FIELD:
