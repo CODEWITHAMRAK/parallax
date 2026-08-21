@@ -18,3 +18,23 @@ export const fetchChatAction = async (userInput, context) => {
   }
   return await response.json();
 };
+
+export const saveDraft = async (formId, values, currentStepIndex) => {
+  const response = await apiFetch(`/api/drafts/save`, {
+    method: "POST",
+    body: JSON.stringify({ formId, values, currentStepIndex })
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to save draft: ${response.statusText}`);
+  }
+  return await response.json();
+};
+
+export const getDraft = async (formId) => {
+  const response = await apiFetch(`/api/drafts/${formId}`);
+  if (!response.ok) {
+    if (response.status === 404) return null;
+    throw new Error(`Failed to fetch draft: ${response.statusText}`);
+  }
+  return await response.json();
+};

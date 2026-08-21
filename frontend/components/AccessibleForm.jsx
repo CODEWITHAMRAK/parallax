@@ -7,15 +7,74 @@ import { Button } from "./ui/button.jsx";
 import { executeAction } from "../lib/actionDispatcher.js";
 import { useRouter } from "next/navigation";
 import { ACTIONS } from "../lib/navigation.js";
+import { fetchChatAction, getDraft, saveDraft } from "../lib/apiService.js";
 
 export default function AccessibleForm({ formId }) {
   const { schema, values, completed, loadSchema, loadingSchema, error } = useFormStore();
-  const { currentStepIndex, currentFieldId } = useNavigationStore();
+  const { currentStepIndex, currentFieldId, stepHistory, setSystemMessage } = useNavigationStore();
   const router = useRouter();
 
   useEffect(() => {
-    if (formId) loadSchema(formId);
+    const initForm = async () => {
+      if (!formId) return;
+      await loadSchema(formId);
+      try {
+        const draftData = await getDraft(formId);
+        if (draftData && draftData.draft) {
+          useFormStore.setState(state => ({ 
+            values: { ...state.values, ...draftData.draft.values } 
+          }));
+          if (draftData.draft.currentStepIndex !== undefined) {
+            useNavigationStore.getState().setStep(draftData.draft.currentStepIndex, "Draft restored.");
+          }
+        }
+      } catch (e) {
+        console.error("Failed to load draft", e);
+      }
+    };
+    initForm();
   }, [formId, loadSchema]);
+
+  // Auto-save progress
+  useEffect(() => {
+    if (schema && formId) {
+      const timer = setTimeout(() => {
+        saveDraft(formId, values, currentStepIndex).catch(e => console.error("Auto-save failed", e));
+      }, 1500);
+      return () => clearTimeout(timer);
+    }
+  }, [values, currentStepIndex, schema, formId]);
+
+  const fetchingRef = React.useRef(false);
+
+  // Conversational auto-greeting when entering a step for the first time
+  useEffect(() => {
+    if (schema && schema.steps[currentStepIndex] && (!stepHistory || !stepHistory[currentStepIndex]) && !fetchingRef.current) {
+      fetchingRef.current = true;
+      setSystemMessage("", true); // Clear stale message instantly (bypass cache) to show loading state
+      const fetchGreeting = async () => {
+        try {
+          const currentStep = schema.steps[currentStepIndex];
+          const context = {
+            current_page: 'form',
+            form_title: schema.title,
+            current_step: { id: currentStep.id, title: currentStep.title, fields: currentStep.fields },
+            form_values: useFormStore.getState().values,
+            available_steps: schema.steps.map(s => s.id)
+          };
+          const action = await fetchChatAction("I just entered this step. Please greet me and ask for the first missing field.", context);
+          if (action.message) {
+            setSystemMessage(action.message);
+          }
+        } catch (e) {
+          console.error("Failed to auto-fetch greeting", e);
+        } finally {
+          fetchingRef.current = false;
+        }
+      };
+      fetchGreeting();
+    }
+  }, [currentStepIndex, schema, stepMessages, setSystemMessage]);
 
   if (loadingSchema) {
     return <div className="p-8 text-xl animate-pulse text-primary">Loading form details...</div>;

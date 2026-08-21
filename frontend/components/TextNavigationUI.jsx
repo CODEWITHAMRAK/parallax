@@ -19,6 +19,9 @@ export default function TextNavigationUI() {
     e.preventDefault();
     if (!input.trim()) return;
     
+    // Add user input to local history before sending
+    useNavigationStore.getState().addMessageToHistory(currentStepIndex, "user", input);
+    
     setLoading(true);
     
     try {
@@ -26,9 +29,10 @@ export default function TextNavigationUI() {
       const currentField = currentStep ? currentStep.fields.find(f => f.id === currentFieldId) : null;
       
       const context = {
+        chat_history: useNavigationStore.getState().stepHistory[currentStepIndex] || [],
         current_page: currentPage,
         form_title: schema?.title,
-        current_step: currentStep ? { id: currentStep.id, title: currentStep.title } : null,
+        current_step: currentStep ? { id: currentStep.id, title: currentStep.title, fields: currentStep.fields } : null,
         current_field: currentField ? { id: currentField.id, label: currentField.label, type: currentField.type } : null,
         form_values: values,
         available_steps: schema ? schema.steps.map(s => s.id) : []
@@ -57,8 +61,10 @@ export default function TextNavigationUI() {
           <div className="flex-1 bg-muted rounded-2xl p-4 md:p-5 rounded-tl-sm text-foreground text-xl font-medium">
             {loading ? (
               <span className="animate-pulse">Thinking...</span>
+            ) : systemMessage ? (
+              systemMessage
             ) : (
-              systemMessage || "I'm ready to help."
+              <span className="animate-pulse">Getting things ready...</span>
             )}
           </div>
         </div>
