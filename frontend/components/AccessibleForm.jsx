@@ -8,11 +8,13 @@ import { executeAction } from "../lib/actionDispatcher.js";
 import { useRouter } from "next/navigation";
 import { ACTIONS } from "../lib/navigation.js";
 import { fetchChatAction, getDraft, saveDraft } from "../lib/apiService.js";
+import { useVoice } from "../hooks/useVoice.js";
 
 export default function AccessibleForm({ formId }) {
   const { schema, values, completed, loadSchema, loadingSchema, error, draftLoaded } = useFormStore();
   const { currentStepIndex, currentFieldId, stepHistory, setSystemMessage } = useNavigationStore();
   const router = useRouter();
+  const { speak } = useVoice();
 
   useEffect(() => {
     const initForm = async () => {
@@ -67,6 +69,7 @@ export default function AccessibleForm({ formId }) {
           const action = await fetchChatAction("I just entered this step. Please greet me and ask for the first missing field.", context);
           if (action.message) {
             setSystemMessage(action.message);
+            speak(action.message);
           }
         } catch (e) {
           console.error("Failed to auto-fetch greeting", e);

@@ -12,7 +12,7 @@ export const saveDraft = async (req, res) => {
     const draft = await Draft.findOneAndUpdate(
       { userId, formId },
       { values, currentStepIndex },
-      { new: true, upsert: true }
+      { returnDocument: 'after', upsert: true }
     );
 
     res.status(200).json({ message: "Draft saved successfully", draft });
