@@ -105,6 +105,11 @@ export const executeAction = (action, router) => {
       // Handle submission logic (API call)
       break;
 
+    case ACTIONS.RESTART_FORM:
+      formStore.resetForm();
+      navStore.resetNavigation(action.message || "The form has been restarted. Let's begin from the first step.");
+      break;
+
     default:
       navStore.setSystemMessage(action.message || "I'm not sure how to do that.");
       break;

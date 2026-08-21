@@ -10,7 +10,7 @@ import { ACTIONS } from "../lib/navigation.js";
 import { fetchChatAction, getDraft, saveDraft } from "../lib/apiService.js";
 
 export default function AccessibleForm({ formId }) {
-  const { schema, values, completed, loadSchema, loadingSchema, error } = useFormStore();
+  const { schema, values, completed, loadSchema, loadingSchema, error, draftLoaded } = useFormStore();
   const { currentStepIndex, currentFieldId, stepHistory, setSystemMessage } = useNavigationStore();
   const router = useRouter();
 
@@ -25,11 +25,13 @@ export default function AccessibleForm({ formId }) {
             values: { ...state.values, ...draftData.draft.values } 
           }));
           if (draftData.draft.currentStepIndex !== undefined) {
-            useNavigationStore.getState().setStep(draftData.draft.currentStepIndex, "Draft restored.");
+            useNavigationStore.getState().setStep(draftData.draft.currentStepIndex);
           }
         }
       } catch (e) {
         console.error("Failed to load draft", e);
+      } finally {
+        useFormStore.setState({ draftLoaded: true });
       }
     };
     initForm();
@@ -49,7 +51,7 @@ export default function AccessibleForm({ formId }) {
 
   // Conversational auto-greeting when entering a step for the first time
   useEffect(() => {
-    if (schema && schema.steps[currentStepIndex] && (!stepHistory || !stepHistory[currentStepIndex]) && !fetchingRef.current) {
+    if (schema && schema.steps[currentStepIndex] && (!stepHistory || !stepHistory[currentStepIndex]) && draftLoaded && !fetchingRef.current) {
       fetchingRef.current = true;
       setSystemMessage("", true); // Clear stale message instantly (bypass cache) to show loading state
       const fetchGreeting = async () => {
@@ -74,7 +76,7 @@ export default function AccessibleForm({ formId }) {
       };
       fetchGreeting();
     }
-  }, [currentStepIndex, schema, stepMessages, setSystemMessage]);
+  }, [currentStepIndex, schema, stepHistory, setSystemMessage, draftLoaded]);
 
   if (loadingSchema) {
     return <div className="p-8 text-xl animate-pulse text-primary">Loading form details...</div>;

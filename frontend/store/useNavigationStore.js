@@ -81,6 +81,15 @@ const useNavigationStore = create((set, get) => ({
       }
       return { systemMessage: message || "You are already on the first step." };
     });
+  },
+
+  resetNavigation: (message = "") => {
+    set({
+      currentStepIndex: 0,
+      currentFieldId: null,
+      stepHistory: {},
+      systemMessage: message
+    });
   }
 }));
 

@@ -6,10 +6,11 @@ const useFormStore = create((set, get) => ({
   values: {},
   completed: {},
   loadingSchema: false,
+  draftLoaded: false,
   error: null,
 
   loadSchema: async (formId) => {
-    set({ loadingSchema: true, error: null });
+    set({ loadingSchema: true, error: null, draftLoaded: false });
     try {
       const schema = await fetchFormSchema(formId);
       // Initialize values and completed
@@ -44,6 +45,21 @@ const useFormStore = create((set, get) => ({
       values: { ...state.values, [fieldId]: "" },
       completed: { ...state.completed, [fieldId]: false }
     }));
+  },
+
+  resetForm: () => {
+    set((state) => {
+      if (!state.schema) return state;
+      const initialValues = {};
+      const initialCompleted = {};
+      state.schema.steps.forEach(step => {
+        step.fields.forEach(field => {
+          initialValues[field.id] = "";
+          initialCompleted[field.id] = false;
+        });
+      });
+      return { values: initialValues, completed: initialCompleted };
+    });
   }
 }));
 

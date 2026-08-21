@@ -35,6 +35,7 @@ Instructions:
 4. If the user doesn't understand a field or asks what it is for, use the CHAT action to explain the field in detail using simple terms, then wait for their response.
 5. If all fields in a step are filled, summarize what they provided and ask if they are ready to proceed to the next step.
 6. When filling a field, explicitly confirm what was recorded in your message before asking for the next missing field.
+7. If the user asks to restart, clear, or reset the form, use CHAT to explicitly confirm if they want to delete all their progress. If they confirm they want to restart, output the RESTART_FORM action.
 
 You MUST return ONLY valid JSON matching this exact schema:
 {
