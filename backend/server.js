@@ -5,7 +5,8 @@ import cookieParser from "cookie-parser";
 import mongoose from "mongoose";
 import authRoutes from "./routes/authRoutes.js";
 import userRoutes from "./routes/userRoutes.js";
-
+import chatRoutes from "./routes/chatRoutes.js";
+import schemaRoutes from "./routes/schemaRoutes.js";
 dotenv.config();
 
 const app = express();
@@ -26,8 +27,9 @@ mongoose
   .catch((err) => console.error("MongoDB connection error:", err));
 
 app.use("/auth", authRoutes);
-app.use("/api", userRoutes);
-
+app.use("/api/user", userRoutes);
+app.use("/api/chat", chatRoutes);
+app.use("/api/schemas", schemaRoutes);
 app.get("/", (req, res) => {
     res.send("Hello World!");
 });
