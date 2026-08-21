@@ -2,11 +2,14 @@ import { create } from 'zustand';
 
 const useNavigationStore = create((set, get) => ({
   currentPage: "home", // "home", "form", etc.
+  language: "English", // default language
   currentStepIndex: 0,
   currentFieldId: null,
   lastAction: null,
   systemMessage: "Welcome to Lumina Assist. How can I help you today?",
   stepHistory: {}, // cache for step conversational history [{role, content}]
+
+  setLanguage: (lang) => set({ language: lang }),
 
   setPage: (pageId) => {
     set({ currentPage: pageId, systemMessage: "" });

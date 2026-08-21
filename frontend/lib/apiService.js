@@ -38,3 +38,14 @@ export const getDraft = async (formId) => {
   }
   return await response.json();
 };
+
+export const updateUserLanguage = async (language) => {
+  const response = await apiFetch(`/api/user/language`, {
+    method: "PUT",
+    body: JSON.stringify({ language })
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to update language: ${response.statusText}`);
+  }
+  return await response.json();
+};

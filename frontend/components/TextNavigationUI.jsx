@@ -56,8 +56,6 @@ export default function TextNavigationUI({ inline = false }) {
     const {
         state: voiceState,
         errorMsg: voiceError,
-        language,
-        setLanguage,
         interactionMode,
         setInteractionMode,
         startListening,
@@ -147,6 +145,14 @@ export default function TextNavigationUI({ inline = false }) {
     const processInput = async (textToProcess) => {
         if (!textToProcess.trim()) return;
 
+        const normalized = textToProcess.trim().toLowerCase().replace(/[^a-z]/g, '');
+        if (['okay', 'ok', 'thankyou', 'you'].includes(normalized) && textToProcess.trim().split(/\s+/).length <= 2) {
+            console.warn("[TextNavUI Debug] Ignoring likely STT silence hallucination: ", textToProcess);
+            const currentMode = document.getElementById('interaction-mode-indicator')?.dataset?.mode;
+            if (currentMode === 'voice') window.dispatchEvent(new Event('start-voice-turn'));
+            return;
+        }
+
         const navState = useNavigationStore.getState();
         const formState = useFormStore.getState();
 
@@ -179,6 +185,7 @@ export default function TextNavigationUI({ inline = false }) {
                     : null,
                 form_values: formState.values,
                 available_steps: formState.schema ? formState.schema.steps.map((s) => s.id) : [],
+                language: navState.language,
             };
 
             const action = await fetchChatAction(textToProcess, context);
@@ -206,9 +213,9 @@ export default function TextNavigationUI({ inline = false }) {
                             "interaction-mode-indicator",
                         )?.dataset?.mode;
                         if (modeAfterSpeak === "voice") {
-                            startVoiceTurn();
+                            window.dispatchEvent(new Event('start-voice-turn'));
                         }
-                    }, 1500);
+                    }, 100);
                 });
             } else {
                 executeAction(action, router);
@@ -309,16 +316,6 @@ export default function TextNavigationUI({ inline = false }) {
                             ? "Voice Mode"
                             : "Text Mode"}
                     </button>
-
-                    <select
-                        value={language}
-                        onChange={(e) => setLanguage(e.target.value)}
-                        className="bg-muted text-foreground border-none rounded-md px-2 py-1 outline-none font-medium cursor-pointer"
-                    >
-                        <option value="en-IN">English (India)</option>
-                        <option value="hi-IN">Hindi (India)</option>
-                        <option value="kn-IN">Kannada (India)</option>
-                    </select>
                 </div>
 
                 {voiceError && (

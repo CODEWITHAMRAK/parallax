@@ -74,7 +74,7 @@ export default function AccessibleForm({ formId }) {
               speak(action.message).then(() => {
                 setTimeout(() => {
                   window.dispatchEvent(new Event('start-voice-turn'));
-                }, 1000);
+                }, 200);
               });
             }
           }

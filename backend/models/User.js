@@ -19,6 +19,10 @@ const userSchema = new mongoose.Schema(
     picture: {
       type: String,
     },
+    preferredLanguage: {
+      type: String,
+      default: "English",
+    },
   },
   { timestamps: true }
 );

@@ -17,7 +17,7 @@ export class VoiceController {
     this.checkInterval = null;
 
     // Constants
-    this.MIN_DECIBELS = 7; // Increased threshold to avoid triggering on background noise
+    this.MIN_DECIBELS = 15; // Increased threshold to avoid triggering on background noise
     this.INITIAL_SILENCE_DURATION = 8000; // 8s timeout if no speech is detected at all
     this.SPEECH_COMPLETION_DURATION = 2500; // 2.5s of silence after speech triggers end
     this.MAX_DURATION = 30000; // 30s hard stop
