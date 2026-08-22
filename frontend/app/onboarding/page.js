@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import useNavigationStore from '@/store/useNavigationStore';
 import useLocalizationStore from '@/store/useLocalizationStore';
+import { useVoiceStore } from '@/hooks/useVoice';
 import { updateUserLanguage } from '@/lib/apiService';
 import { Button } from '@/components/ui/button';
 
@@ -49,21 +50,32 @@ export default function LanguageSelectionPage() {
   const router = useRouter();
   const { data: session, status } = useSession();
   const setStoreLanguage = useNavigationStore((state) => state.setLanguage);
+  const setInteractionMode = useVoiceStore((state) => state.setInteractionMode);
   
   const [recommendedLang, setRecommendedLang] = useState(LANGUAGES[0]);
   const [otherLangs, setOtherLangs] = useState(LANGUAGES.slice(1));
   const [loading, setLoading] = useState(true);
+  const [showModeSelection, setShowModeSelection] = useState(false);
 
   useEffect(() => {
     if (status === "unauthenticated") {
-      router.push("/api/auth/signin?callbackUrl=/language");
+      router.push("/api/auth/signin?callbackUrl=/onboarding");
       return;
     }
 
     if (status === "authenticated") {
-      fetchLocationAndSetLanguage();
+      if (session?.user?.preferredLanguage) {
+        const preferredLang = session.user.preferredLanguage;
+        setStoreLanguage(preferredLang);
+        useLocalizationStore.getState().fetchDictionary(preferredLang).then(() => {
+          setShowModeSelection(true);
+          setLoading(false);
+        });
+      } else {
+        fetchLocationAndSetLanguage();
+      }
     }
-  }, [status, router]);
+  }, [status, session, router, setStoreLanguage]);
 
   const fetchLocationAndSetLanguage = () => {
     if (!navigator.geolocation) {
@@ -125,6 +137,54 @@ export default function LanguageSelectionPage() {
       <div className="min-h-screen bg-[#fcf9f8] flex items-center justify-center p-4">
         <p className="text-xl text-[#003441] font-medium animate-pulse">Please wait...</p>
       </div>
+    );
+  }
+
+  if (showModeSelection) {
+    return (
+      <main className="min-h-screen bg-[#fcf9f8] flex flex-col items-center justify-center p-6 md:p-12">
+        <div className="w-full max-w-[800px] text-center mb-16 mt-8">
+          <h1 className="font-heading text-5xl md:text-6xl text-[#003441] tracking-tight font-bold mb-4">
+            Welcome back!
+          </h1>
+          <p className="text-xl md:text-2xl text-muted-foreground">
+            How would you like to use Parallax today?
+          </p>
+        </div>
+
+        <div className="w-full max-w-[900px] flex flex-col md:flex-row items-center gap-8 justify-center">
+          <Button 
+            onClick={() => {
+              setInteractionMode('text');
+              router.push('/home');
+            }}
+            className="w-full md:w-1/2 h-[220px] rounded-3xl bg-white border-4 border-slate-200 hover:border-[#003441] flex flex-col items-center justify-center shadow-lg transition-all group"
+            variant="outline"
+          >
+            <span className="text-4xl text-[#003441] font-bold mb-4 group-hover:scale-105 transition-transform">
+              Normal Mode
+            </span>
+            <span className="text-xl text-muted-foreground text-center px-4">
+              Navigate with touch and screen
+            </span>
+          </Button>
+
+          <Button 
+            onClick={() => {
+              setInteractionMode('voice');
+              router.push('/home');
+            }}
+            className="w-full md:w-1/2 h-[220px] rounded-3xl bg-[#003441] text-white flex flex-col items-center justify-center shadow-xl hover:scale-105 transition-transform group"
+          >
+            <span className="text-4xl font-bold mb-4">
+              No Touch Mode
+            </span>
+            <span className="text-xl opacity-80 text-center px-4">
+              Navigate entirely by voice
+            </span>
+          </Button>
+        </div>
+      </main>
     );
   }
 
@@ -190,7 +250,10 @@ export default function LanguageSelectionPage() {
             Or, if you prefer to navigate entirely with your voice:
           </p>
           <Button 
-            onClick={() => router.push('/home')}
+            onClick={() => {
+              setInteractionMode('voice');
+              router.push('/home');
+            }}
             className="w-full max-w-[600px] h-[120px] rounded-3xl bg-[#003441] text-white flex flex-col items-center justify-center shadow-xl hover:scale-105 transition-transform group"
           >
             <span className="text-4xl md:text-5xl font-bold mb-2">

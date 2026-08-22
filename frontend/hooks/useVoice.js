@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { voiceService } from '../lib/voiceService';
 import useLocalizationStore from '../store/useLocalizationStore';
 import useNavigationStore from '../store/useNavigationStore';
@@ -23,6 +23,7 @@ export function useVoice() {
   const [transcribedText, setTranscribedText] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const { interactionMode, setInteractionMode } = useVoiceStore();
+  const scannerAudioRef = useRef(null);
 
   const startListening = useCallback(async (onSpeechEndCallback = null, onSpeechStart = null) => {
     try {
@@ -128,7 +129,23 @@ export function useVoice() {
     const langCode = langMap[currentLang] || 'en-IN';
     const audioUrl = `/audio/scanner/${langCode}/${key}.wav`;
 
+    const isHighPriority = ["document_captured", "looks_good", "try_again", "upload_failed"].includes(key);
+
+    // If something is currently playing
+    if (scannerAudioRef.current && !scannerAudioRef.current.paused) {
+      if (isHighPriority) {
+        // High priority interrupts immediately
+        scannerAudioRef.current.pause();
+        scannerAudioRef.current.currentTime = 0;
+      } else {
+        // Normal priority waits its turn (ignores this trigger)
+        return; 
+      }
+    }
+
     const audio = new Audio(audioUrl);
+    scannerAudioRef.current = audio;
+    
     audio.play().catch(e => console.error("Error playing precomputed audio:", e));
   }, [speak]);
 

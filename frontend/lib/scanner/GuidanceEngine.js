@@ -15,8 +15,26 @@ export class GuidanceEngine {
   process(geometry, speakCallback) {
     if (!geometry) {
       this.stabilityFrames = 0;
-      return this._debounceInstruction("Document lost. Find the document.", speakCallback);
+      this.lostFrames = (this.lostFrames || 0) + 1;
+      
+      let instructionText = null;
+      let currentInstruction = this.lastInstruction || "Document lost. Find the document.";
+
+      // Analyze clearly: wait for ~15 frames (about 0.75s) of NO document before complaining.
+      if (this.lostFrames > 15) {
+        const debounceResult = this._debounceInstruction("Document lost. Find the document.", speakCallback);
+        instructionText = debounceResult.instructionText;
+        currentInstruction = "Document lost. Find the document.";
+      }
+      
+      return { 
+        instructionText, 
+        isStable: false, 
+        currentInstruction 
+      };
     }
+    
+    this.lostFrames = 0;
 
     const { center, areaRatio, angle, processWidth, processHeight } = geometry;
     const centerX = processWidth / 2;
@@ -78,13 +96,29 @@ export class GuidanceEngine {
 
   _debounceInstruction(instruction, speakCallback) {
     const now = Date.now();
+    const isHighPriority = instruction === "Hold still." || instruction === "Document captured.";
     
-    // If the instruction hasn't changed and we recently said it, don't repeat
-    if (instruction === this.lastInstruction && (now - this.lastInstructionTime) < this.debounceMs) {
+    // Always speak high priority instructions immediately, but don't spam them either
+    if (isHighPriority) {
+        if (instruction !== this.lastInstruction || (now - this.lastInstructionTime) > 2000) {
+            this.lastInstruction = instruction;
+            this.lastInstructionTime = now;
+            if (speakCallback) speakCallback(instruction);
+        }
+        return { instructionText: instruction };
+    }
+
+    // If the instruction is exactly the same as the last one we spoke, NEVER repeat it consecutively.
+    if (instruction === this.lastInstruction) {
+        return { instructionText: null }; 
+    }
+
+    // For normal NEW instructions, strictly enforce a cooldown so we don't speak over ourselves
+    if ((now - this.lastInstructionTime) < this.debounceMs) {
       return { instructionText: null }; 
     }
     
-    // If instruction changed, or it's been a while, speak it
+    // Cooldown is over, we can speak the new instruction
     this.lastInstruction = instruction;
     this.lastInstructionTime = now;
     
