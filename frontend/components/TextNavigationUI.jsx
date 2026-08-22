@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import useNavigationStore from "../store/useNavigationStore.js";
 import useFormStore from "../store/useFormStore.js";
-import { fetchChatAction } from "../lib/apiService.js";
+import { fetchChatAction, fetchChatActionStream } from "../lib/apiService.js";
 import { executeAction } from "../lib/actionDispatcher.js";
 import { useRouter } from "next/navigation";
 import { Button } from "./ui/button.jsx";
@@ -66,6 +66,8 @@ export default function TextNavigationUI({
         startListening,
         pauseListening,
         speak,
+        queueSpeak,
+        waitForSpeakQueue,
         playSystemAudio,
         stopSpeaking,
     } = useVoice();
@@ -255,26 +257,29 @@ export default function TextNavigationUI({
                 language: navState.language,
             };
 
-            const action = await fetchChatAction(textToProcess, context);
+            const action = await fetchChatActionStream(textToProcess, context, (sentence) => {
+                const currentMode = document.getElementById("interaction-mode-indicator")?.dataset?.mode;
+                if (currentMode === "voice") {
+                    queueSpeak(sentence, () => setLoading(false));
+                }
+                navState.appendSystemMessage(sentence);
+                setLoading(false);
+            });
             const currentMode = document.getElementById(
                 "interaction-mode-indicator",
             )?.dataset?.mode;
 
             // Explicitly speak only if in voice mode
-            if (action.message && currentMode === "voice") {
-                const isScannerAction = action.action === "OPEN_SCANNER" || action.action === "OPEN_FILE_PICKER";
+            if (action && action.message && currentMode === "voice") {
+                const actionName = action.action?.trim()?.toUpperCase();
+                const isScannerAction = actionName === "OPEN_SCANNER" || actionName === "OPEN_FILE_PICKER" || actionName === "UPLOAD_DOCUMENT";
 
-                // For non-scanner actions, execute immediately so UI responds while speaking
-                if (!isScannerAction) {
-                    executeAction(action, router);
-                }
+                // Always execute immediately so UI responds while speaking, even for scanner
+                executeAction(action, router);
 
-                await speak(action.message, () => {
-                    setLoading(false);
-                });
+                await waitForSpeakQueue();
 
                 if (isScannerAction) {
-                    executeAction(action, router);
                     setLoading(false);
                 } else {
                     setLoading(false);
@@ -285,7 +290,7 @@ export default function TextNavigationUI({
                         window.dispatchEvent(new Event("start-voice-turn"));
                     }
                 }
-            } else {
+            } else if (action) {
                 executeAction(action, router);
                 setLoading(false);
             }

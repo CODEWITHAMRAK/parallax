@@ -9,6 +9,7 @@ import { useRouter } from "next/navigation";
 import { ACTIONS } from "../lib/navigation.js";
 import {
     fetchChatAction,
+    fetchChatActionStream,
     getDraft,
     saveDraft,
     autofillFromDocumentApi,
@@ -42,7 +43,7 @@ export default function AccessibleForm({ formId }) {
     const { currentStepIndex, currentFieldId, stepHistory, setSystemMessage } =
         useNavigationStore();
     const router = useRouter();
-    const { speak, pauseListening } = useVoice();
+    const { speak, queueSpeak, waitForSpeakQueue, pauseListening } = useVoice();
 
     const [activeScannerTarget, setActiveScannerTarget] = useState(null); // 'autofill' or field object
     const [isProcessing, setIsProcessing] = useState(false);
@@ -163,25 +164,21 @@ export default function AccessibleForm({ formId }) {
                         promptMsg = `I just entered the ${currentStep.title} step. Please briefly announce this step and remind me I can tell you my details or scan/upload documents.${docType}`;
                     }
 
-                    const action = await fetchChatAction(promptMsg, context);
-                    if (action.message) {
+                    const action = await fetchChatActionStream(promptMsg, context, (sentence) => {
+                        if (currentMode === "voice") {
+                            queueSpeak(sentence);
+                        }
+                        useNavigationStore.getState().appendSystemMessage(sentence);
+                    });
+
+                    if (action && action.message) {
                         setSystemMessage(action.message);
                         if (currentMode === "voice") {
-                            speak(action.message).then(() => {
-                                const modeAfter = document.getElementById(
-                                    "interaction-mode-indicator",
-                                )?.dataset?.mode;
+                            waitForSpeakQueue().then(() => {
+                                const modeAfter = document.getElementById("interaction-mode-indicator")?.dataset?.mode;
                                 if (modeAfter === "voice") {
-                                    window.dispatchEvent(
-                                        new Event("start-voice-turn"),
-                                    );
+                                    window.dispatchEvent(new Event("start-voice-turn"));
                                 }
-                            }).catch((err) => {
-                                if (err.message === "INTERRUPTED") {
-                                    console.log("TTS interrupted in AccessibleForm. Aborting voice turn trigger.");
-                                    return;
-                                }
-                                console.error(err);
                             });
                         }
                     } else if (currentMode === "voice") {
@@ -377,25 +374,25 @@ export default function AccessibleForm({ formId }) {
                 form_values: useFormStore.getState().values,
                 available_steps: schema.steps.map((s) => s.id),
             };
-            const action = await fetchChatAction(msg, context);
-            if (action.message) {
+            const action = await fetchChatActionStream(msg, context, (sentence) => {
+                const currentMode = document.getElementById("interaction-mode-indicator")?.dataset?.mode;
+                if (currentMode === "voice") {
+                    queueSpeak(sentence);
+                }
+                useNavigationStore.getState().appendSystemMessage(sentence);
+            });
+
+            if (action && action.message) {
                 setSystemMessage(action.message);
                 const currentMode = document.getElementById(
                     "interaction-mode-indicator",
                 )?.dataset?.mode;
                 if (currentMode === "voice") {
-                    speak(action.message).then(() => {
+                    waitForSpeakQueue().then(() => {
                         setTimeout(
-                            () =>
-                                window.dispatchEvent(
-                                    new Event("start-voice-turn"),
-                                ),
-                            200,
+                            () => window.dispatchEvent(new Event("start-voice-turn")),
+                            200
                         );
-                    }).catch((err) => {
-                        if (err.message !== "INTERRUPTED") {
-                            console.error(err);
-                        }
                     });
                 }
             }

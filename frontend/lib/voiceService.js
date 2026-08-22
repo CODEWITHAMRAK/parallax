@@ -202,70 +202,109 @@ export class VoiceController {
     return data.text;
   }
 
-  async speak(text, languageCode = "en-IN", onPlaybackStart = null) {
-    this.isSpeaking = true;
-    this.stopSpeaking();
-    this.pauseListening(false); // Ensure microphone is off while TTS plays to avoid echoes, and don't submit noise
+  async _fetchTTSAudio(text, languageCode) {
+    const response = await fetch(`${API_URL}/api/voice/speak`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, languageCode }),
+    });
 
-    try {
-      const response = await fetch(`${API_URL}/api/voice/speak`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text, languageCode }),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        this.isSpeaking = false;
-        throw new Error(errorText || "Failed to synthesize speech");
-      }
-
-      const data = await response.json();
-      const audioContent = data.audio;
-
-      const audioBlob = new Blob(
-        [Uint8Array.from(atob(audioContent), (c) => c.charCodeAt(0))],
-        { type: "audio/wav" }
-      );
-      const audioUrl = URL.createObjectURL(audioBlob);
-
-      return new Promise((resolve, reject) => {
-        this.speakResolve = resolve;
-        this.speakReject = reject;
-        this.audioElement = new Audio(audioUrl);
-        this.audioElement.onplay = () => {
-          if (onPlaybackStart) onPlaybackStart();
-        };
-        this.audioElement.onended = () => {
-          URL.revokeObjectURL(audioUrl);
-          this.isSpeaking = false;
-          if (this.speakResolve) {
-            this.speakResolve();
-            this.speakResolve = null;
-            this.speakReject = null;
-          }
-        };
-        this.audioElement.onerror = (err) => {
-          this.isSpeaking = false;
-          if (this.speakReject) {
-            this.speakReject(err);
-            this.speakResolve = null;
-            this.speakReject = null;
-          }
-        };
-        this.audioElement.play().catch((err) => {
-          this.isSpeaking = false;
-          if (this.speakReject) {
-            this.speakReject(err);
-            this.speakResolve = null;
-            this.speakReject = null;
-          }
-        });
-      });
-    } catch (e) {
-      this.isSpeaking = false;
-      throw e;
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(errorText || "Failed to synthesize speech");
     }
+
+    const data = await response.json();
+    const audioContent = data.audio;
+
+    const audioBlob = new Blob(
+      [Uint8Array.from(atob(audioContent), (c) => c.charCodeAt(0))],
+      { type: "audio/wav" }
+    );
+    return URL.createObjectURL(audioBlob);
+  }
+
+  async _playAudioUrl(audioUrl, onPlaybackStart) {
+    return new Promise((resolve, reject) => {
+      this.speakResolve = resolve;
+      this.speakReject = reject;
+      this.audioElement = new Audio(audioUrl);
+      this.audioElement.onplay = () => {
+        if (onPlaybackStart) onPlaybackStart();
+      };
+      this.audioElement.onended = () => {
+        if (this.speakResolve) {
+          this.speakResolve();
+          this.speakResolve = null;
+          this.speakReject = null;
+        }
+      };
+      this.audioElement.onerror = (err) => {
+        if (this.speakReject) {
+          this.speakReject(err);
+          this.speakResolve = null;
+          this.speakReject = null;
+        }
+      };
+      this.audioElement.play().catch((err) => {
+        if (this.speakReject) {
+          this.speakReject(err);
+          this.speakResolve = null;
+          this.speakReject = null;
+        }
+      });
+    });
+  }
+
+  async queueSpeak(text, languageCode = "en-IN", onPlaybackStart = null) {
+    // Start fetching immediately, add the promise to the queue
+    const fetchPromise = this._fetchTTSAudio(text, languageCode);
+    this.ttsQueue = this.ttsQueue || [];
+    this.ttsQueue.push({ fetchPromise, onPlaybackStart });
+    
+    if (!this.isProcessingTTSQueue) {
+      this.processTTSQueue();
+    }
+  }
+
+  async processTTSQueue() {
+    this.isProcessingTTSQueue = true;
+    this.isSpeaking = true;
+    this.pauseListening(false);
+    
+    try {
+      while (this.ttsQueue && this.ttsQueue.length > 0) {
+        const { fetchPromise, onPlaybackStart } = this.ttsQueue.shift();
+        let audioUrl = null;
+        try {
+          audioUrl = await fetchPromise;
+          await this._playAudioUrl(audioUrl, onPlaybackStart);
+        } catch (e) {
+          console.error("Queue TTS Error:", e);
+          if (e.message === "INTERRUPTED") break;
+        } finally {
+          if (audioUrl) URL.revokeObjectURL(audioUrl);
+        }
+      }
+    } finally {
+      this.isSpeaking = false;
+      this.isProcessingTTSQueue = false;
+    }
+  }
+
+  async speak(text, languageCode = "en-IN", onPlaybackStart = null) {
+    this.stopSpeaking(); // Clear queue and stop current audio
+    return new Promise((resolve, reject) => {
+        this.queueSpeak(text, languageCode, onPlaybackStart);
+        
+        // Polling to wait for queue to empty, keeping backward compatibility
+        const checkDone = setInterval(() => {
+            if (!this.isProcessingTTSQueue) {
+                clearInterval(checkDone);
+                resolve();
+            }
+        }, 100);
+    });
   }
 
   playSystemAudio(type, langCode = "en-IN") {
@@ -342,6 +381,8 @@ export class VoiceController {
   }
 
   stopSpeaking() {
+    this.ttsQueue = [];
+    this.isProcessingTTSQueue = false;
     this.isSpeaking = false;
     if (this.audioElement) {
       this.audioElement.pause();

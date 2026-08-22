@@ -27,6 +27,73 @@ export const fetchChatAction = async (userInput, context) => {
   return await response.json();
 };
 
+export const fetchChatActionStream = async (userInput, context, onSentence) => {
+  const response = await apiFetch(`/api/chat/stream`, {
+    method: "POST",
+    body: JSON.stringify({ userInput, context })
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to get action stream: ${response.statusText}`);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder("utf-8");
+  let finalAction = null;
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      // Process any remaining buffer
+      if (buffer) {
+        const lines = buffer.split("\n");
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            const jsonStr = line.slice(6);
+            if (jsonStr === "[DONE]") continue;
+            try {
+              const data = JSON.parse(jsonStr);
+              if (data.type === "sentence" && onSentence) {
+                onSentence(data.text);
+              } else if (data.type === "action") {
+                finalAction = data.data;
+              }
+            } catch (e) {}
+          }
+        }
+      }
+      break;
+    }
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || ""; // Keep the last incomplete line in buffer
+
+    for (const line of lines) {
+      const trimmedLine = line.trim();
+      if (trimmedLine.startsWith("data: ")) {
+        const jsonStr = trimmedLine.slice(6);
+        if (jsonStr === "[DONE]") continue;
+        try {
+          const data = JSON.parse(jsonStr);
+          if (data.type === "sentence" && onSentence) {
+            onSentence(data.text);
+          } else if (data.type === "action") {
+            finalAction = data.data;
+          } else if (data.type === "error") {
+            throw new Error(data.message);
+          }
+        } catch (e) {
+          // ignore incomplete json from chunk boundaries
+        }
+      }
+    }
+  }
+
+  return finalAction;
+};
+
 export const saveDraft = async (formId, values, currentStepIndex) => {
   const response = await apiFetch(`/api/drafts/save`, {
     method: "POST",

@@ -38,7 +38,9 @@ export const executeAction = (action, router) => {
     });
   }
 
-  switch (action.action) {
+  const actionName = action.action?.trim()?.toUpperCase();
+
+  switch (actionName) {
     case 'CHAT':
       navStore.setSystemMessage(action.message || "I'm here to help.");
       break;
@@ -164,14 +166,15 @@ export const executeAction = (action, router) => {
 
     case ACTIONS.OPEN_SCANNER:
       if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('trigger-scanner', { detail: { target: action.target } }));
+        window.dispatchEvent(new CustomEvent('trigger-scanner', { detail: { target: action.target || action.field || 'autofill' } }));
       }
       if (action.message) navStore.setSystemMessage(action.message);
       break;
 
     case ACTIONS.OPEN_FILE_PICKER:
+    case ACTIONS.UPLOAD_DOCUMENT:
       if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('trigger-file-picker', { detail: { target: action.target } }));
+        window.dispatchEvent(new CustomEvent('trigger-file-picker', { detail: { target: action.target || action.field || 'autofill' } }));
       }
       if (action.message) navStore.setSystemMessage(action.message);
       break;
