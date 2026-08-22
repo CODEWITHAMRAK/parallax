@@ -77,7 +77,7 @@ ${JSON.stringify(baseDictionary, null, 2)}
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        model: "mimo-v2.5-pro",
+        model: "mimo-v2.5",
         messages: [{ role: "user", content: prompt }],
         max_tokens: 1500,
         temperature: 0.1,

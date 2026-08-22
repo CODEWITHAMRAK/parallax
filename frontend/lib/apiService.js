@@ -49,3 +49,14 @@ export const updateUserLanguage = async (language) => {
   }
   return await response.json();
 };
+
+export const autofillFromDocumentApi = async (fileDataUrl, fields) => {
+  const response = await apiFetch(`/api/upload/autofill`, {
+    method: "POST",
+    body: JSON.stringify({ fileDataUrl, fields })
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to autofill document: ${response.statusText}`);
+  }
+  return await response.json();
+};

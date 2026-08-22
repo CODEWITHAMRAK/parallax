@@ -32,7 +32,7 @@ async function translateText(text, lang) {
       "Content-Type": "application/json"
     },
     body: JSON.stringify({
-      model: "mimo-v2.5-pro",
+      model: "mimo-v2.5",
       messages: [{ role: "user", content: prompt }],
       max_tokens: 100,
       temperature: 0.1,

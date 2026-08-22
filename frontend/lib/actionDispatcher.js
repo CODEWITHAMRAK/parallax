@@ -136,6 +136,20 @@ export const executeAction = (action, router) => {
       navStore.resetNavigation(action.message || t('form_restarted'));
       break;
 
+    case ACTIONS.OPEN_SCANNER:
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('trigger-scanner', { detail: { target: action.target } }));
+      }
+      if (action.message) navStore.setSystemMessage(action.message);
+      break;
+
+    case ACTIONS.OPEN_FILE_PICKER:
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('trigger-file-picker', { detail: { target: action.target } }));
+      }
+      if (action.message) navStore.setSystemMessage(action.message);
+      break;
+
     default:
       navStore.setSystemMessage(action.message || "I'm not sure how to do that.");
       break;
