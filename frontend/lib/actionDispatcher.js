@@ -46,15 +46,15 @@ export const executeAction = (action, router) => {
         navStore.setPage('home');
         router.push('/home');
         navStore.setSystemMessage(action.message || "Navigating home.");
-      } else if (action.target === 'scholarship_application' || action.target === 'national_scholarship' || action.target === 'scholarship' || action.target === 'scholarship_form') {
+      } else if (action.target.includes('scholarship')) {
         navStore.setPage('form');
         router.push('/form/national_scholarship');
         navStore.setSystemMessage(action.message || "Opening National Scholarship Form.", true);
-      } else if (action.target === 'education_loan' || action.target === 'loan' || action.target === 'loan_form') {
+      } else if (action.target.includes('education') || action.target.includes('loan')) {
         navStore.setPage('form');
         router.push('/form/education_loan');
         navStore.setSystemMessage(action.message || "Opening Education Loan Form.", true);
-      } else if (action.target === 'bus_pass' || action.target === 'bus_pass_application' || action.target === 'bus_pass_form') {
+      } else if (action.target.includes('bus') || action.target.includes('pass')) {
         navStore.setPage('form');
         router.push('/form/bus_pass');
         navStore.setSystemMessage(action.message || "Opening Student Bus Pass Application.", true);
