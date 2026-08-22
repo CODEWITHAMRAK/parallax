@@ -3,7 +3,7 @@ import Draft from "../models/Draft.js";
 export const saveDraft = async (req, res) => {
   try {
     const { formId, values, currentStepIndex } = req.body;
-    const userId = req.user.id; // From authMiddleware
+    const userId = req.user.userId; // Fix: decoded token has userId
 
     if (!formId) {
       return res.status(400).json({ error: "formId is required" });
@@ -25,7 +25,7 @@ export const saveDraft = async (req, res) => {
 export const getDraft = async (req, res) => {
   try {
     const { formId } = req.params;
-    const userId = req.user.id; // From authMiddleware
+    const userId = req.user.userId; // Fix: decoded token has userId
 
     const draft = await Draft.findOne({ userId, formId });
     if (!draft) {

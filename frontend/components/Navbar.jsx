@@ -4,25 +4,48 @@ import React from 'react';
 import { signOut, useSession } from 'next-auth/react';
 import { Button } from './ui/button';
 import useNavigationStore from '../store/useNavigationStore';
+import { updateUserLanguage } from '../lib/apiService';
+
+import Link from 'next/link';
+import { Home } from 'lucide-react';
 
 export default function Navbar() {
   const { data: session } = useSession();
   const language = useNavigationStore((state) => state.language);
   const setLanguage = useNavigationStore((state) => state.setLanguage);
 
+  const handleLanguageChange = async (e) => {
+    const newLang = e.target.value;
+    setLanguage(newLang);
+    try {
+      await updateUserLanguage(newLang);
+    } catch (err) {
+      console.error("Failed to sync language to backend:", err);
+    }
+  };
+
   return (
-    <nav className="w-full border-b border-slate-200 bg-white px-6 py-4 flex items-center justify-between z-50">
-      <div className="flex items-center gap-2">
-        <span className="font-heading text-2xl font-bold text-[#003441] tracking-tight">
-          Parallax
-        </span>
+    <nav className="w-full border-b border-slate-200 bg-white px-4 md:px-6 py-3.5 flex flex-wrap items-center justify-between gap-y-3 z-50 sticky top-0 shadow-sm">
+      <div className="flex items-center gap-2 md:gap-3">
+        <Link href="/home" className="flex items-center gap-2 hover:opacity-85 transition-opacity">
+          <span className="font-heading text-xl md:text-2xl font-bold text-[#003441] tracking-tight">
+            Parallax
+          </span>
+        </Link>
+        <Link 
+          href="/home" 
+          className="text-sm font-medium text-slate-600 hover:text-[#003441] px-2 md:px-2.5 py-1 rounded-md hover:bg-slate-100 flex items-center gap-1.5 transition-all"
+        >
+          <Home className="w-4 h-4" />
+          <span className="hidden sm:inline-block">Home</span>
+        </Link>
       </div>
       
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-2 md:gap-4 w-full sm:w-auto justify-between sm:justify-end">
         <select 
           value={language}
-          onChange={(e) => setLanguage(e.target.value)}
-          className="bg-white border border-slate-200 text-slate-700 text-sm font-medium rounded-md px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-[#003441] focus:border-transparent cursor-pointer hover:border-slate-300 transition-colors"
+          onChange={handleLanguageChange}
+          className="bg-white border border-slate-200 text-slate-700 text-xs md:text-sm font-medium rounded-md px-2 md:px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-[#003441] focus:border-transparent cursor-pointer hover:border-slate-300 transition-colors max-w-[140px] sm:max-w-none truncate"
           aria-label="Select Language"
         >
           <option value="English">English</option>
