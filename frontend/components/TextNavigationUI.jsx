@@ -301,7 +301,7 @@ export default function TextNavigationUI({ inline = false }) {
     const disableVoice = isProcessing || loading || isPreparing;
 
     const containerClasses = inline
-        ? "w-full h-full flex flex-col justify-center bg-background"
+        ? "w-full h-full flex flex-col justify-center bg-transparent"
         : "fixed bottom-0 left-0 w-full bg-background border-t border-border shadow-[0_-4px_20px_rgba(0,0,0,0.05)] z-50 p-4 md:p-6";
 
     const innerClasses = inline

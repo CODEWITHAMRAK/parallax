@@ -386,7 +386,7 @@ export default function AccessibleForm({ formId }) {
         executeAction({ action: ACTIONS.PREVIOUS }, router);
 
     return (
-        <div className="w-full max-w-[800px] mx-auto p-4 md:p-8 bg-card rounded-2xl shadow-[0_4px_20px_rgba(0,52,65,0.15)] min-h-[500px] flex flex-col justify-between relative">
+        <div className="w-full flex flex-col justify-between relative min-h-[500px]">
             {isProcessing && (
                 <div className="absolute inset-0 z-40 bg-background/80 backdrop-blur-sm rounded-2xl flex flex-col items-center justify-center">
                     <Loader2 className="w-16 h-16 text-primary animate-spin mb-4" />
@@ -405,13 +405,35 @@ export default function AccessibleForm({ formId }) {
             />
 
             <div>
-                <div className="mb-6">
-                    <p className="font-heading text-sm text-muted-foreground mb-1 tracking-widest uppercase font-bold">
-                        Step {currentStepIndex + 1} of {schema.steps.length}
-                    </p>
+                {/* Step Header & Progress Bar */}
+                <div className="mb-8 space-y-3">
+                    <div className="flex items-center justify-between">
+                        <span className="text-xs md:text-sm font-bold uppercase tracking-wider text-[#003441] bg-[#003441]/10 px-3.5 py-1 rounded-full">
+                            Step {currentStepIndex + 1} of {schema.steps.length}
+                        </span>
+                        <span className="text-xs md:text-sm font-bold text-slate-500">
+                            {Math.round(((currentStepIndex + 1) / schema.steps.length) * 100)}% Complete
+                        </span>
+                    </div>
+
                     <h2 className="font-heading text-3xl md:text-4xl font-bold text-primary tracking-tight">
                         {currentStep.title}
                     </h2>
+
+                    {/* Visual Progress Bar */}
+                    <div 
+                        className="w-full bg-slate-200 h-2.5 rounded-full overflow-hidden" 
+                        role="progressbar" 
+                        aria-valuenow={currentStepIndex + 1} 
+                        aria-valuemin={1} 
+                        aria-valuemax={schema.steps.length}
+                        aria-label={`Step ${currentStepIndex + 1} of ${schema.steps.length}`}
+                    >
+                        <div 
+                            className="bg-[#003441] h-full rounded-full transition-all duration-500 ease-out shadow-sm"
+                            style={{ width: `${((currentStepIndex + 1) / schema.steps.length) * 100}%` }}
+                        />
+                    </div>
                 </div>
 
                 {/* Impairment-Friendly Big Button Autofill Bar */}
