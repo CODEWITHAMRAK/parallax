@@ -67,7 +67,7 @@ CRITICAL: For fields requiring specific formats (like "YYYY-MM-DD" for dates), y
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        model: "mimo-v2.5-pro",
+        model: "mimo-v2.5",
         messages: [
           { role: "system", content: systemPrompt },
           ...formattedHistory,

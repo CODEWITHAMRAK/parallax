@@ -18,6 +18,20 @@ export const useVoiceStore = create((set) => ({
   setInteractionMode: (mode) => set({ interactionMode: mode }),
 }));
 
+const LANG_MAP = {
+  'English': 'en-IN',
+  'Hindi': 'hi-IN',
+  'Bengali': 'bn-IN',
+  'Gujarati': 'gu-IN',
+  'Kannada': 'kn-IN',
+  'Malayalam': 'ml-IN',
+  'Marathi': 'mr-IN',
+  'Odia': 'od-IN',
+  'Punjabi': 'pa-IN',
+  'Tamil': 'ta-IN',
+  'Telugu': 'te-IN'
+};
+
 export function useVoice() {
   const [state, setState] = useState(VoiceState.IDLE);
   const [transcribedText, setTranscribedText] = useState('');
@@ -27,14 +41,14 @@ export function useVoice() {
 
   const startListening = useCallback(async (onSpeechEndCallback = null, onSpeechStart = null) => {
     try {
-      voiceService.stopSpeaking(); 
+      voiceService.stopSpeaking();
       setErrorMsg('');
       setState(VoiceState.PREPARING);
-      
+
       const handleSpeechEnd = async (audioBlob) => {
         setState(VoiceState.PROCESSING);
         voiceService.pauseListening();
-        
+
         try {
           const text = await voiceService.transcribe(audioBlob);
           setTranscribedText(text);
@@ -52,7 +66,7 @@ export function useVoice() {
       const handleSpeechStartInternal = () => {
         if (onSpeechStart) onSpeechStart();
       };
-      
+
       await voiceService.startListening(handleSpeechStartInternal, handleSpeechEnd);
       setState(VoiceState.LISTENING);
     } catch (err) {
@@ -70,7 +84,9 @@ export function useVoice() {
   const speak = useCallback(async (text, onPlaybackStart = null) => {
     try {
       setState(VoiceState.SPEAKING);
-      await voiceService.speak(text, "en-IN", onPlaybackStart);
+      const currentLang = useNavigationStore.getState().language;
+      const langCode = LANG_MAP[currentLang] || 'en-IN';
+      await voiceService.speak(text, langCode, onPlaybackStart);
       setState(prev => prev === VoiceState.SPEAKING ? VoiceState.IDLE : prev);
     } catch (err) {
       console.error('TTS Error:', err);
@@ -81,8 +97,9 @@ export function useVoice() {
   const playSystemAudio = useCallback(async (type) => {
     try {
       setState(VoiceState.SPEAKING);
-      // Assuming hi-IN is default, can be dynamically linked to Language state later
-      await voiceService.playSystemAudio(type, "hi-IN");
+      const currentLang = useNavigationStore.getState().language;
+      const langCode = LANG_MAP[currentLang] || 'en-IN';
+      await voiceService.playSystemAudio(type, langCode);
       setState(prev => prev === VoiceState.SPEAKING ? VoiceState.IDLE : prev);
     } catch (err) {
       console.error('System Audio Error:', err);
@@ -99,30 +116,25 @@ export function useVoice() {
     // Each maps to a pre-saved .wav filename under /audio/scanner/{lang}/.
     const textToKey = {
       // Guidance instructions
-      'Point your camera at the document.' : 'document_lost',
-      'Move back a little.'                : 'move_back',
-      'Move closer to the document.'       : 'move_closer',
-      'Point camera down a little.'        : 'move_down',
-      'Point camera up a little.'          : 'move_up',
-      'Point camera left a little.'        : 'move_left',
-      'Point camera right a little.'       : 'move_right',
-      'Straighten the document.'           : 'tilt_phone',
-      'Hold still.'                        : 'hold_still',
+      'Point your camera at the document.': 'document_lost',
+      'Move back a little.': 'move_back',
+      'Move closer to the document.': 'move_closer',
+      'Point camera down a little.': 'move_down',
+      'Point camera up a little.': 'move_up',
+      'Point camera left a little.': 'move_left',
+      'Point camera right a little.': 'move_right',
+      'Straighten the document.': 'tilt_phone',
+      'Hold still.': 'hold_still',
 
       // Capture & verification flow
-      'Document captured.'                 : 'document_captured',
-      'Document captured. Processing...'   : 'document_captured',
-      'Verifying document readability...'  : 'verifying_document',
-      'This looks good. Would you like to use this document?' : 'looks_good',
-      'Please try again.'                  : 'try_again',
-      'Saving document...'                 : 'saving_document',
-      'Upload failed. Please try again.'   : 'upload_failed',
-    };
-
-    const langMap = {
-      'English': 'en-IN',
-      'Hindi': 'hi-IN',
-      'Kannada': 'kn-IN'
+      'Document captured.': 'document_captured',
+      'Document captured. Processing...': 'document_captured',
+      'Verifying document readability...': 'verifying_document',
+      'This looks good. Would you like to use this document?': 'looks_good',
+      'Please try again.': 'try_again',
+      'Saving document...': 'saving_document',
+      'Upload failed. Please try again.': 'upload_failed',
+      'This does not appear to be the correct document.': 'wrong_document',
     };
 
     const key = textToKey[text];
@@ -132,7 +144,10 @@ export function useVoice() {
     }
 
     const currentLang = useNavigationStore.getState().language;
-    const langCode = langMap[currentLang] || 'en-IN';
+
+    console.log(useNavigationStore.getState());
+
+    const langCode = LANG_MAP[currentLang] || 'en-IN';
     const audioUrl = `/audio/scanner/${langCode}/${key}.wav`;
 
     const isHighPriority = ["document_captured", "looks_good", "try_again", "upload_failed"].includes(key);
@@ -145,13 +160,13 @@ export function useVoice() {
         scannerAudioRef.current.currentTime = 0;
       } else {
         // Normal priority waits its turn (ignores this trigger)
-        return; 
+        return;
       }
     }
 
     const audio = new Audio(audioUrl);
     scannerAudioRef.current = audio;
-    
+
     audio.play().catch(e => console.error("Error playing precomputed audio:", e));
   }, [speak]);
 
