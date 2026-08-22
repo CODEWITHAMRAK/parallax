@@ -158,7 +158,7 @@ export default function TextNavigationUI({
 
         noResponseTimerRef.current = setTimeout(async () => {
             console.log(
-                "[TextNavUI Debug] 7s silence timer fired! Triggering are_you_there.",
+                "[TextNavUI Debug] 15s silence timer fired! Triggering are_you_there.",
             );
             isTimeoutRef.current = true;
             pauseListening(false); // Manually pause VAD without submitting noise
@@ -176,7 +176,7 @@ export default function TextNavigationUI({
                     300,
                 );
             }
-        }, 7000);
+        }, 15000);
     };
 
     const processInput = async (textToProcess) => {

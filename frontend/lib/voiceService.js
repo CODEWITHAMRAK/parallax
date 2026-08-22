@@ -20,7 +20,7 @@ export class VoiceController {
 
     // Constants
     this.MIN_DECIBELS = 15; // Calibrated for responsive human voice detection across standard microphones
-    this.INITIAL_SILENCE_DURATION = 12000; // 8s timeout if no speech is detected at all
+    this.INITIAL_SILENCE_DURATION = 18000; // 18s timeout if no speech is detected at all
     this.SPEECH_COMPLETION_DURATION = 500; // 0.5s of silence after speech triggers end
     this.MAX_DURATION = 30000; // 30s hard stop
     this.maxTimer = null;
@@ -56,7 +56,11 @@ export class VoiceController {
         await this.audioContext.resume();
       }
 
-      this.mediaRecorder = new MediaRecorder(this.stream, { mimeType: 'audio/webm' });
+      let options = { mimeType: 'audio/webm' };
+      if (!MediaRecorder.isTypeSupported('audio/webm')) {
+        options = MediaRecorder.isTypeSupported('audio/mp4') ? { mimeType: 'audio/mp4' } : {};
+      }
+      this.mediaRecorder = new MediaRecorder(this.stream, options);
       this.audioChunks = [];
 
       this.mediaRecorder.ondataavailable = (e) => {
@@ -64,7 +68,8 @@ export class VoiceController {
       };
 
       this.mediaRecorder.onstop = () => {
-        const audioBlob = new Blob(this.audioChunks, { type: 'audio/webm' });
+        const mimeType = this.mediaRecorder.mimeType || 'audio/webm';
+        const audioBlob = new Blob(this.audioChunks, { type: mimeType });
         const process = this.shouldSubmit !== false;
         this.shouldSubmit = true; // reset
         this.audioChunks = [];
@@ -186,7 +191,8 @@ export class VoiceController {
       return null;
     }
     const formData = new FormData();
-    formData.append("audio", audioBlob, "audio.webm");
+    const ext = audioBlob.type.includes('mp4') ? 'mp4' : 'webm';
+    formData.append("audio", audioBlob, `audio.${ext}`);
 
     const response = await fetch(`${API_URL}/api/voice/transcribe`, {
       method: "POST",

@@ -87,7 +87,14 @@ export function useCamera() {
 
   const stopCamera = useCallback(() => {
     if (streamRef.current) {
-      streamRef.current.getTracks().forEach(t => t.stop());
+      streamRef.current.getTracks().forEach(t => {
+        try {
+          if (t.getCapabilities && t.getCapabilities().torch) {
+            t.applyConstraints({ advanced: [{ torch: false }] }).catch(() => {});
+          }
+        } catch(e) {}
+        t.stop();
+      });
       streamRef.current = null;
     }
     if (videoRef.current) {

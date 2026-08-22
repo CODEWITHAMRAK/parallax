@@ -215,7 +215,7 @@ export default function AccessibleForm({ formId }) {
                 const field = schema?.steps[currentStepIndex]?.fields.find(
                     (f) => f.id === target,
                 );
-                if (field) setActiveScannerTarget(field);
+                setActiveScannerTarget(field || "autofill");
             }
         };
 
@@ -227,7 +227,7 @@ export default function AccessibleForm({ formId }) {
                 const field = schema?.steps[currentStepIndex]?.fields.find(
                     (f) => f.id === target,
                 );
-                if (field) setActiveFileTarget(field);
+                setActiveFileTarget(field || "autofill");
             }
         };
 

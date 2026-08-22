@@ -187,7 +187,7 @@ export default function LanguageSelectionPage() {
 
     setVoiceStatusMsg("Listening... (Tell me your language)");
 
-    // 7s silence safety timer
+    // 15s silence safety timer
     silenceTimerRef.current = setTimeout(async () => {
       isTimeoutRef.current = true;
       pauseListening(false);
@@ -203,7 +203,7 @@ export default function LanguageSelectionPage() {
         }
       }
       setTimeout(() => startVoiceLanguageSelection(), 400);
-    }, 7000);
+    }, 15000);
 
     await startListening(
       async (transcribed) => {

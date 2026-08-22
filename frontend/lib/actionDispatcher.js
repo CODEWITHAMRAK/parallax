@@ -168,7 +168,9 @@ export const executeAction = (action, router) => {
 
     case ACTIONS.OPEN_SCANNER:
       if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('trigger-scanner', { detail: { target: action.target || action.field || 'autofill' } }));
+        let rawTarget = action.target || action.field || 'autofill';
+        if (rawTarget.toLowerCase() === 'autofill' || rawTarget.toLowerCase() === 'scanner') rawTarget = 'autofill';
+        window.dispatchEvent(new CustomEvent('trigger-scanner', { detail: { target: rawTarget } }));
       }
       if (action.message) navStore.setSystemMessage(action.message);
       break;
@@ -176,7 +178,9 @@ export const executeAction = (action, router) => {
     case ACTIONS.OPEN_FILE_PICKER:
     case ACTIONS.UPLOAD_DOCUMENT:
       if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('trigger-file-picker', { detail: { target: action.target || action.field || 'autofill' } }));
+        let rawTarget = action.target || action.field || 'autofill';
+        if (rawTarget.toLowerCase() === 'autofill' || rawTarget.toLowerCase() === 'document') rawTarget = 'autofill';
+        window.dispatchEvent(new CustomEvent('trigger-file-picker', { detail: { target: rawTarget } }));
       }
       if (action.message) navStore.setSystemMessage(action.message);
       break;
