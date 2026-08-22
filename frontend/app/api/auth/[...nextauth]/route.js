@@ -41,6 +41,7 @@ const handler = NextAuth({
       if (token.backendJwt) {
         session.backendJwt = token.backendJwt;
         session.user.id = token.user?._id;
+        session.user.preferredLanguage = token.user?.preferredLanguage;
       }
       return session;
     },

@@ -144,21 +144,12 @@ export default function DocumentScanner({ expectedDocumentType = "income_certifi
       console.error('[Scanner] detect() threw:', e);
     }
 
-    console.log('[Scanner] state:', currentState, '| geometry:', geometry ? 'FOUND' : 'null',
-      '| video:', videoRef.current.videoWidth + 'x' + videoRef.current.videoHeight);
-    
     drawOverlay(geometry);
 
-    const guidance = guidanceRef.current.process(geometry, null); // don't speak every frame
+    const guidance = guidanceRef.current.process(geometry, speakInstruction);
     
     if (guidance.currentInstruction) {
-      setGuidanceText(prev => {
-        // Only call TTS when the instruction text actually changes
-        if (prev !== guidance.currentInstruction) {
-          speakInstruction(guidance.currentInstruction);
-        }
-        return guidance.currentInstruction;
-      });
+      setGuidanceText(guidance.currentInstruction);
     }
 
     if (geometry && currentState === SCANNER_STATES.SEARCHING) {
@@ -189,49 +180,113 @@ export default function DocumentScanner({ expectedDocumentType = "income_certifi
   }, []); // Run once on mount only
 
   const drawOverlay = (geometry) => {
-    if (!overlayCanvasRef.current || !videoRef.current) return;
-    const ctx = overlayCanvasRef.current.getContext('2d');
-    const width = overlayCanvasRef.current.width = videoRef.current.clientWidth;
-    const height = overlayCanvasRef.current.height = videoRef.current.clientHeight;
+    const canvas = overlayCanvasRef.current;
+    const video  = videoRef.current;
+    if (!canvas || !video) return;
 
-    ctx.clearRect(0, 0, width, height);
+    // Read the display size from the video element's bounding rect
+    // (not .clientWidth which can be stale before layout finishes)
+    const rect   = video.getBoundingClientRect();
+    const dw     = rect.width;
+    const dh     = rect.height;
 
-    if (geometry) {
-      // Handle object-fit: cover scaling
-      const videoRatio = videoRef.current.videoWidth / videoRef.current.videoHeight;
-      const containerRatio = width / height;
-      
-      let drawWidth, drawHeight, offsetX, offsetY;
-      
-      if (containerRatio > videoRatio) {
-        drawWidth = width;
-        drawHeight = width / videoRatio;
-        offsetX = 0;
-        offsetY = (height - drawHeight) / 2;
-      } else {
-        drawHeight = height;
-        drawWidth = height * videoRatio;
-        offsetX = (width - drawWidth) / 2;
-        offsetY = 0;
-      }
+    // Only resize the canvas when the display size actually changed —
+    // assigning canvas.width/height clears the canvas AND resets all context state.
+    if (canvas.width !== dw || canvas.height !== dh) {
+      canvas.width  = dw;
+      canvas.height = dh;
+    }
 
-      const scaleX = drawWidth / geometry.processWidth;
-      const scaleY = drawHeight / geometry.processHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, dw, dh);
+
+    if (!geometry) return;
+
+    // ── Map from OpenCV processWidth × processHeight → display rect ──────────
+    // The <video> uses object-fit:cover, which means the video is scaled to
+    // fill the container keeping aspect ratio, potentially cropping.
+    const vw = video.videoWidth;
+    const vh = video.videoHeight;
+    if (!vw || !vh) return;
+
+    const videoRatio     = vw / vh;
+    const containerRatio = dw / dh;
+
+    let scaledW, scaledH, offX, offY;
+
+    if (containerRatio > videoRatio) {
+      // Container is wider than video → letterbox on top/bottom
+      scaledW = dw;
+      scaledH = dw / videoRatio;
+      offX = 0;
+      offY = (dh - scaledH) / 2;
+    } else {
+      // Container is taller than video → pillarbox on left/right
+      scaledH = dh;
+      scaledW = dh * videoRatio;
+      offX = (dw - scaledW) / 2;
+      offY = 0;
+    }
+
+    const sx = scaledW / geometry.processWidth;
+    const sy = scaledH / geometry.processHeight;
+
+    const corners = geometry.corners;
+
+    // ── Draw corner-marker style outline ─────────────────────────────────────
+    // Full quad fill (subtle)
+    ctx.beginPath();
+    ctx.moveTo(offX + corners[0].x * sx, offY + corners[0].y * sy);
+    for (let i = 1; i < 4; i++) {
+      ctx.lineTo(offX + corners[i].x * sx, offY + corners[i].y * sy);
+    }
+    ctx.closePath();
+    ctx.fillStyle   = 'rgba(0, 229, 255, 0.08)';
+    ctx.fill();
+
+    // Thick stroke
+    ctx.beginPath();
+    ctx.moveTo(offX + corners[0].x * sx, offY + corners[0].y * sy);
+    for (let i = 1; i < 4; i++) {
+      ctx.lineTo(offX + corners[i].x * sx, offY + corners[i].y * sy);
+    }
+    ctx.closePath();
+    ctx.lineWidth   = 3;
+    ctx.strokeStyle = '#00e5ff';
+    ctx.stroke();
+
+    // Corner accents — bold teal L-shapes at each corner
+    const cornerLen = 24;
+    ctx.lineWidth   = 6;
+    ctx.strokeStyle = '#00e5ff';
+    ctx.lineCap     = 'round';
+
+    for (let i = 0; i < 4; i++) {
+      const prev = corners[(i + 3) % 4];
+      const cur  = corners[i];
+      const next = corners[(i + 1) % 4];
+
+      const cx = offX + cur.x * sx;
+      const cy = offY + cur.y * sy;
+
+      // Directions toward prev and next corners
+      const toPrevX = offX + prev.x * sx - cx;
+      const toPrevY = offY + prev.y * sy - cy;
+      const toNextX = offX + next.x * sx - cx;
+      const toNextY = offY + next.y * sy - cy;
+
+      const lenPrev = Math.hypot(toPrevX, toPrevY) || 1;
+      const lenNext = Math.hypot(toNextX, toNextY) || 1;
 
       ctx.beginPath();
-      ctx.moveTo(offsetX + geometry.corners[0].x * scaleX, offsetY + geometry.corners[0].y * scaleY);
-      for (let i = 1; i < 4; i++) {
-        ctx.lineTo(offsetX + geometry.corners[i].x * scaleX, offsetY + geometry.corners[i].y * scaleY);
-      }
-      ctx.closePath();
-      
-      ctx.lineWidth = 4;
-      ctx.strokeStyle = '#00e5ff';
-      ctx.fillStyle = 'rgba(0, 229, 255, 0.1)';
+      ctx.moveTo(cx + (toPrevX / lenPrev) * cornerLen, cy + (toPrevY / lenPrev) * cornerLen);
+      ctx.lineTo(cx, cy);
+      ctx.lineTo(cx + (toNextX / lenNext) * cornerLen, cy + (toNextY / lenNext) * cornerLen);
       ctx.stroke();
-      ctx.fill();
     }
   };
+
+
 
   const handleCapture = async (geometry) => {
     setScannerState(SCANNER_STATES.PROCESSING);

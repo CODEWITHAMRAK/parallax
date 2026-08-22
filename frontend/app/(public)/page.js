@@ -1,10 +1,19 @@
 "use client";
 
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Button } from '@/components/ui/button.jsx';
-import { signIn } from 'next-auth/react';
+import { signIn, useSession } from 'next-auth/react';
+import { useRouter } from 'next/navigation';
 
 export default function LandingPage() {
+  const { status } = useSession();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (status === 'authenticated') {
+      router.push('/onboarding');
+    }
+  }, [status, router]);
   return (
     <main className="min-h-screen bg-background flex flex-col items-center justify-center p-4">
       <div className="max-w-[800px] w-full text-center space-y-8">
