@@ -128,13 +128,14 @@ export default function AccessibleForm({ formId }) {
                         )?.dataset?.mode;
                         if (currentMode === "voice") {
                             speak(action.message).then(() => {
-                                setTimeout(
-                                    () =>
-                                        window.dispatchEvent(
-                                            new Event("start-voice-turn"),
-                                        ),
-                                    200,
-                                );
+                                const modeAfter = document.getElementById(
+                                    "interaction-mode-indicator",
+                                )?.dataset?.mode;
+                                if (modeAfter === "voice") {
+                                    window.dispatchEvent(
+                                        new Event("start-voice-turn"),
+                                    );
+                                }
                             });
                         }
                     }

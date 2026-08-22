@@ -19,9 +19,9 @@ export class VoiceController {
     this.checkInterval = null;
 
     // Constants
-    this.MIN_DECIBELS = 28; // Elevated threshold (28/255) to firmly filter out background hiss, fans, and ambient noise
-    this.INITIAL_SILENCE_DURATION = 8000; // 8s timeout if no speech is detected at all
-    this.SPEECH_COMPLETION_DURATION = 1500; // 2.0s of silence after speech triggers end
+    this.MIN_DECIBELS = 17; // Calibrated for responsive human voice detection across standard microphones
+    this.INITIAL_SILENCE_DURATION = 12000; // 8s timeout if no speech is detected at all
+    this.SPEECH_COMPLETION_DURATION = 500; // 0.5s of silence after speech triggers end
     this.MAX_DURATION = 30000; // 30s hard stop
     this.maxTimer = null;
     this.initialSilenceTimer = null;
@@ -33,27 +33,32 @@ export class VoiceController {
       console.warn("[VoiceService] Blocked startListening because AI is currently speaking.");
       return;
     }
-    
+
     // Acquire lock immediately to prevent concurrent orphaned streams
     this.isListening = true;
-    
-    try {
-      this.stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
-      });
 
-      this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
-      const source = this.audioContext.createMediaStreamSource(this.stream);
-      this.analyser = this.audioContext.createAnalyser();
-      this.analyser.fftSize = 512;
-      this.analyser.minDecibels = -90;
-      this.analyser.maxDecibels = -10;
-      this.analyser.smoothingTimeConstant = 0.85;
-      source.connect(this.analyser);
+    try {
+      // Warm persistent stream: Reuse existing stream if active for instant (<5ms) turn start
+      if (!this.stream || !this.stream.active || !this.audioContext || this.audioContext.state === "closed") {
+        this.stream = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: false }
+        });
+
+        this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const source = this.audioContext.createMediaStreamSource(this.stream);
+        this.analyser = this.audioContext.createAnalyser();
+        this.analyser.fftSize = 512;
+        this.analyser.minDecibels = -90;
+        this.analyser.maxDecibels = -10;
+        this.analyser.smoothingTimeConstant = 0.85;
+        source.connect(this.analyser);
+      } else if (this.audioContext.state === "suspended") {
+        await this.audioContext.resume();
+      }
 
       this.mediaRecorder = new MediaRecorder(this.stream, { mimeType: 'audio/webm' });
       this.audioChunks = [];
-      
+
       this.mediaRecorder.ondataavailable = (e) => {
         if (e.data.size > 0) this.audioChunks.push(e.data);
       };
@@ -79,11 +84,11 @@ export class VoiceController {
         }
       }, this.MAX_DURATION);
 
-      // Initial silence safety net (if no speech detected in 4s)
+      // Initial silence safety net (if no speech detected in 12s)
       this.initialSilenceTimer = setTimeout(() => {
         if (this.isListening && !this.speechStarted) {
           console.warn("[VAD] Initial silence timeout reached. Stopping.");
-          this.pauseListening();
+          this.pauseListening(false);
         }
       }, this.INITIAL_SILENCE_DURATION);
 
@@ -94,13 +99,21 @@ export class VoiceController {
         if (!this.analyser || !this.isListening) return;
 
         this.analyser.getByteFrequencyData(dataArray);
-        
-        let sum = 0;
-        for (let i = 0; i < bufferLength; i++) sum += dataArray[i];
-        const average = sum / bufferLength;
 
-        if (average > this.MIN_DECIBELS) {
-          // Noise detected above threshold
+        // Focus on vocal frequency range (bins 2 to 45, ~150Hz to 3.5kHz)
+        // Skipping bins 0-1 to eliminate DC offset and 50/60Hz mains hum
+        const startBin = 2;
+        const endBin = Math.min(45, bufferLength);
+        let sum = 0;
+        for (let i = startBin; i < endBin; i++) {
+          sum += dataArray[i];
+        }
+        const vocalAverage = sum / (endBin - startBin);
+
+        // Hysteresis: 14 to start speaking, 10 to continue speaking
+        const isSpeakingNow = this.speechStarted ? (vocalAverage > 10) : (vocalAverage > 14);
+
+        if (isSpeakingNow) {
           if (this.silenceTimer) {
             clearTimeout(this.silenceTimer);
             this.silenceTimer = null;
@@ -111,15 +124,15 @@ export class VoiceController {
               clearTimeout(this.initialSilenceTimer);
               this.initialSilenceTimer = null;
             }
-            console.log("[VAD] Speech started.");
+            console.log(`[VAD] Speech started (energy: ${vocalAverage.toFixed(1)})`);
             if (onSpeechStartCallback) onSpeechStartCallback();
           }
         } else {
           // Silence detected
           if (this.speechStarted && !this.silenceTimer) {
             this.silenceTimer = setTimeout(() => {
-              console.log("[VAD] Speech completion silence detected. Stopping.");
-              this.pauseListening();
+              console.log("[VAD] Speech ended after silence. Stopping and transcribing...");
+              this.pauseListening(true);
             }, this.SPEECH_COMPLETION_DURATION);
           }
         }
@@ -147,9 +160,17 @@ export class VoiceController {
     if (this.silenceTimer) clearTimeout(this.silenceTimer);
     if (this.maxTimer) clearTimeout(this.maxTimer);
     if (this.initialSilenceTimer) clearTimeout(this.initialSilenceTimer);
-    
+
+    // Keep stream and audioContext warm for instant next-turn listening
+    this.mediaRecorder = null;
+    this.isListening = false;
+    this.speechStarted = false;
+  }
+
+  destroy() {
+    this.cleanup();
     if (this.stream) {
-      this.stream.getTracks().forEach(track => track.stop());
+      this.stream.getTracks().forEach((track) => track.stop());
       this.stream = null;
     }
     if (this.audioContext && this.audioContext.state !== "closed") {
@@ -157,15 +178,12 @@ export class VoiceController {
       this.audioContext = null;
     }
     this.analyser = null;
-    this.mediaRecorder = null;
-    this.isListening = false;
-    this.speechStarted = false;
   }
 
   async transcribe(audioBlob) {
     if (!audioBlob || audioBlob.size < 1000) {
-       console.warn("Audio blob empty or too small, skipping transcription");
-       return null;
+      console.warn("Audio blob empty or too small, skipping transcription");
+      return null;
     }
     const formData = new FormData();
     formData.append("audio", audioBlob, "audio.webm");
@@ -238,29 +256,31 @@ export class VoiceController {
 
   playSystemAudio(type, langCode = "en-IN") {
     const supportedLangs = ["hi-IN", "bn-IN", "kn-IN", "ml-IN", "mr-IN", "od-IN", "pa-IN", "ta-IN", "te-IN", "gu-IN", "en-IN"];
-    const validLang = supportedLangs.includes(langCode) ? langCode : "en-IN";
+    let validLang = supportedLangs.includes(langCode) ? langCode : "en-IN";
+    if (type === "ask_language") {
+      validLang = "en-IN";
+    }
 
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
       this.isSpeaking = true;
       this.stopSpeaking();
-      this.pauseListening(false); // Don't submit ambient noise when interrupting with system audio
-      
+      this.pauseListening(false);
       const audioSource = `/audio/system/${validLang}/${type}.wav`;
       this.audioElement = new Audio(audioSource);
-      
+
       this.audioElement.onended = () => {
         this.isSpeaking = false;
         resolve();
       };
-      
+
       this.audioElement.onerror = (e) => {
-        console.error("System audio playback error:", e);
-        console.warn(`System audio for ${type} in ${validLang} not found, falling back to TTS...`);
+        console.warn(`System audio for ${type} in ${validLang} not found, falling back to TTS...`, e);
         let fallbackText = "Sorry, I didn't catch that. Could you please repeat?";
         if (type === "are_you_there" || type === "still_there") fallbackText = "Are you still there? Please say something or tap the mic.";
         if (type === "network_error" || type === "connection_trouble") fallbackText = "Sorry, I'm having trouble connecting right now.";
         if (type === "welcome_home") fallbackText = "Welcome to Parallax! You can tell me what you want to do, like 'Open the scholarship form'.";
-        
+        if (type === "ask_language") fallbackText = "Please choose your language. Which language do you speak? ನೀವು ಯಾವ ಭಾಷೆಯನ್ನು ಮಾತನಾಡುತ್ತೀರಿ? आप कौन सी भाषा बोलते हैं?";
+
         try {
           const t = useLocalizationStore?.getState()?.t;
           if (t) {
@@ -274,12 +294,13 @@ export class VoiceController {
         }
 
         this.isSpeaking = false;
-        this.speak(fallbackText, validLang).then(resolve).catch(reject);
+        this.speak(fallbackText, validLang).then(resolve).catch(resolve);
       };
 
       this.audioElement.play().catch((err) => {
+        console.warn("Autoplay was blocked or audio play failed:", err);
         this.isSpeaking = false;
-        reject(err);
+        resolve();
       });
     });
   }

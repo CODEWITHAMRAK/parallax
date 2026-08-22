@@ -5,22 +5,22 @@ import { useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import useNavigationStore from '@/store/useNavigationStore';
 import useLocalizationStore from '@/store/useLocalizationStore';
-import { useVoice } from '@/hooks/useVoice';
+import { useVoice, VoiceState } from '@/hooks/useVoice';
 import { updateUserLanguage } from '@/lib/apiService';
 import { Button } from '@/components/ui/button';
 
 const LANGUAGES = [
-  { code: 'en', name: 'English', native: 'English' },
-  { code: 'hi', name: 'Hindi', native: 'हिन्दी' },
-  { code: 'bn', name: 'Bengali', native: 'বাংলা' },
-  { code: 'gu', name: 'Gujarati', native: 'ગુજરાતી' },
-  { code: 'kn', name: 'Kannada', native: 'ಕನ್ನಡ' },
-  { code: 'ml', name: 'Malayalam', native: 'മലയാളം' },
-  { code: 'mr', name: 'Marathi', native: 'मराठी' },
-  { code: 'or', name: 'Odia', native: 'ଓଡ଼ିଆ' },
-  { code: 'pa', name: 'Punjabi', native: 'ਪੰਜਾਬੀ' },
-  { code: 'ta', name: 'Tamil', native: 'தமிழ்' },
-  { code: 'te', name: 'Telugu', native: 'తెలుగు' }
+  { code: 'en', name: 'English', native: 'English', keywords: ['english', 'inglish', 'angrezi', 'angreji'] },
+  { code: 'hi', name: 'Hindi', native: 'हिन्दी', keywords: ['hindi', 'हिन्दी', 'हिंदी', 'hindustani'] },
+  { code: 'kn', name: 'Kannada', native: 'ಕನ್ನಡ', keywords: ['kannada', 'kannad', 'kanada', 'ಕನ್ನಡ', 'kannadaa'] },
+  { code: 'ta', name: 'Tamil', native: 'தமிழ்', keywords: ['tamil', 'thamizh', 'தமிழ்'] },
+  { code: 'te', name: 'Telugu', native: 'తెలుగు', keywords: ['telugu', 'telegu', 'తెలుగు'] },
+  { code: 'bn', name: 'Bengali', native: 'বাংলা', keywords: ['bengali', 'bangla', 'বাংলা'] },
+  { code: 'gu', name: 'Gujarati', native: 'ગુજરાતી', keywords: ['gujarati', 'gujrati', 'ગુજરાતી'] },
+  { code: 'ml', name: 'Malayalam', native: 'മലയാളം', keywords: ['malayalam', 'malyalam', 'മലയാളം'] },
+  { code: 'mr', name: 'Marathi', native: 'मराठी', keywords: ['marathi', 'मराठी'] },
+  { code: 'or', name: 'Odia', native: 'ଓଡ଼ಿଆ', keywords: ['odia', 'oriya', 'ଓଡ଼ିଆ'] },
+  { code: 'pa', name: 'Punjabi', native: 'ਪੰਜਾਬੀ', keywords: ['punjabi', 'panjabi', 'ਪੰਜਾਬੀ'] }
 ];
 
 const STATE_LANGUAGE_MAP = {
@@ -50,7 +50,7 @@ export default function LanguageSelectionPage() {
   const router = useRouter();
   const { data: session, status } = useSession();
   const setStoreLanguage = useNavigationStore((state) => state.setLanguage);
-  const { interactionMode, setInteractionMode, startListening, pauseListening, playSystemAudio, speak, stopSpeaking } = useVoice();
+  const { interactionMode, setInteractionMode, startListening, pauseListening, playSystemAudio, speak, stopSpeaking, voiceState } = useVoice();
   
   const [step, setStep] = useState('mode'); // 'mode' | 'language'
   const [recommendedLang, setRecommendedLang] = useState(LANGUAGES[0]);
@@ -60,14 +60,47 @@ export default function LanguageSelectionPage() {
   const silenceTimerRef = useRef(null);
   const isTimeoutRef = useRef(false);
 
+  useEffect(() => {
+    if (voiceState === VoiceState.PROCESSING) {
+      setVoiceStatusMsg("Processing...");
+    }
+  }, [voiceState]);
+
   // Stop any voice activity on unmount
   useEffect(() => {
     return () => {
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-      pauseListening();
+      pauseListening(false);
       stopSpeaking();
     };
   }, [pauseListening, stopSpeaking]);
+
+  // When step changes to mode, halt audio
+  useEffect(() => {
+    if (step === 'mode') {
+      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+      isTimeoutRef.current = true;
+      pauseListening(false);
+      stopSpeaking();
+      setVoiceStatusMsg('');
+    }
+  }, [step, pauseListening, stopSpeaking]);
+
+  // When entering language step in voice mode, trigger voice language selection
+  useEffect(() => {
+    if (step === 'language' && interactionMode === 'voice') {
+      startVoiceLanguageSelection();
+    }
+  }, [step, interactionMode]);
+
+  const handleBackToMode = () => {
+    if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+    isTimeoutRef.current = true;
+    pauseListening(false);
+    stopSpeaking();
+    setVoiceStatusMsg('');
+    setStep('mode');
+  };
 
   useEffect(() => {
     if (status === "unauthenticated") {
@@ -162,24 +195,30 @@ export default function LanguageSelectionPage() {
       setTimeout(() => startVoiceLanguageSelection(), 400);
     }, 7000);
 
-    startListening(
+    await startListening(
       async (transcribed) => {
         if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
         if (isTimeoutRef.current) return;
 
         if (transcribed) {
-          setVoiceStatusMsg("Processing...");
+          console.log("[Onboarding Voice] Transcribed:", transcribed);
+          setVoiceStatusMsg(`Heard: "${transcribed}"`);
           const lower = transcribed.toLowerCase();
           
           let matchedLang = null;
           for (const lang of LANGUAGES) {
-            if (lower.includes(lang.name.toLowerCase()) || lower.includes(lang.native.toLowerCase())) {
+            if (
+              lower.includes(lang.name.toLowerCase()) || 
+              lower.includes(lang.native.toLowerCase()) ||
+              (lang.keywords && lang.keywords.some(k => lower.includes(k)))
+            ) {
               matchedLang = lang.name;
               break;
             }
           }
 
           if (matchedLang) {
+            setVoiceStatusMsg(`Setting language to ${matchedLang}...`);
             await speak(`Setting language to ${matchedLang}`);
             handleLanguageSelect(matchedLang);
           } else {
@@ -203,7 +242,7 @@ export default function LanguageSelectionPage() {
       },
       () => {
         if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-        setVoiceStatusMsg("Recording...");
+        setVoiceStatusMsg("Listening... (Recording your voice)");
       }
     );
   };
@@ -211,9 +250,6 @@ export default function LanguageSelectionPage() {
   const selectMode = (mode) => {
     setInteractionMode(mode);
     setStep('language');
-    if (mode === 'voice') {
-      startVoiceLanguageSelection();
-    }
   };
 
   if (loading || status === "loading") {
@@ -298,7 +334,7 @@ export default function LanguageSelectionPage() {
             </div>
           </div>
           <div className="pt-4">
-            <Button onClick={() => setStep('mode')} variant="outline" className="text-[#003441] border-[#003441]">
+            <Button onClick={handleBackToMode} variant="outline" className="text-[#003441] border-[#003441]">
               Back to Mode Selection
             </Button>
           </div>
@@ -364,7 +400,7 @@ export default function LanguageSelectionPage() {
         </div>
 
         <div className="pt-12">
-          <Button onClick={() => setStep('mode')} variant="ghost" className="text-muted-foreground hover:text-[#003441]">
+          <Button onClick={handleBackToMode} variant="ghost" className="text-muted-foreground hover:text-[#003441]">
             Go Back
           </Button>
         </div>

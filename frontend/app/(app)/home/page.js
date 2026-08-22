@@ -39,11 +39,9 @@ export default function HomePage() {
           } catch (e) {
             console.warn("Autoplay prevented or audio failed:", e);
           } finally {
-            setTimeout(() => {
-              window.dispatchEvent(new Event('start-voice-turn'));
-            }, 300);
+            window.dispatchEvent(new Event('start-voice-turn'));
           }
-        }, 400);
+        }, 100);
       };
 
       initGreeting();

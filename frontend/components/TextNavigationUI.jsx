@@ -215,21 +215,17 @@ export default function TextNavigationUI({ inline = false, isHomeVoiceOnly = fal
                     setLoading(false);
                 });
 
-                // For scanner action, open scanner ONLY after speaking has finished completely
                 if (isScannerAction) {
                     executeAction(action, router);
                     setLoading(false);
                 } else {
                     setLoading(false);
-                    // If in voice mode and not opening scanner, resume voice turn
-                    setTimeout(() => {
-                        const modeAfterSpeak = document.getElementById(
-                            "interaction-mode-indicator",
-                        )?.dataset?.mode;
-                        if (modeAfterSpeak === "voice") {
-                            window.dispatchEvent(new Event('start-voice-turn'));
-                        }
-                    }, 100);
+                    const modeAfterSpeak = document.getElementById(
+                        "interaction-mode-indicator",
+                    )?.dataset?.mode;
+                    if (modeAfterSpeak === "voice") {
+                        window.dispatchEvent(new Event('start-voice-turn'));
+                    }
                 }
             } else {
                 executeAction(action, router);
@@ -333,7 +329,7 @@ export default function TextNavigationUI({ inline = false, isHomeVoiceOnly = fal
                             />
                         </div>
                         <p className="text-xs text-slate-700 font-medium truncate">
-                            {isListening ? "Listening..." : isSpeaking ? "Speaking..." : systemMessage || "Assistant ready"}
+                            {isListening ? "Listening..." : (isProcessing || loading) ? "Processing..." : isSpeaking ? "Speaking..." : systemMessage || "Assistant ready"}
                         </p>
                     </div>
 
@@ -401,7 +397,7 @@ export default function TextNavigationUI({ inline = false, isHomeVoiceOnly = fal
                                     ? "Warming up mic..."
                                     : isListening
                                       ? "Listening... (Speak now)"
-                                      : isProcessing
+                                      : (isProcessing || loading)
                                         ? "Processing..."
                                         : isSpeaking
                                           ? "Assistant Speaking..."
