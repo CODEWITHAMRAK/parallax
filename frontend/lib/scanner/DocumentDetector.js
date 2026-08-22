@@ -82,14 +82,17 @@ export class DocumentDetector {
       cv.Canny(blurred, edges, lo, hi, 3);
 
       // ── 4. Dilate to close gaps ───────────────────────────────────
-      const kernel = mat(cv.Mat.ones(5, 5, cv.CV_8U));
+      const kernel = mat(cv.Mat.ones(3, 3, cv.CV_8U));
       cv.dilate(edges, edges, kernel, new cv.Point(-1, -1), 1);
+
+      // Draw a 1-pixel border to close contours that touch the screen edge!
+      cv.rectangle(edges, new cv.Point(0, 0), new cv.Point(W - 1, H - 1), new cv.Scalar(255, 255, 255, 255), 1);
 
       // ── 5. Find external contours ─────────────────────────────────
       const contours  = mat(new cv.MatVector());
       const hierarchy = mat(new cv.Mat());
       cv.findContours(edges, contours, hierarchy,
-                      cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+                      cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
 
       // ── 6. Find the best quadrilateral ────────────────────────────
       const frameArea = W * H;
@@ -109,7 +112,13 @@ export class DocumentDetector {
         const hullArea = cv.contourArea(hull);
         cnt.delete();
 
-        if (hullArea < minArea || hullArea > frameArea * 0.98) continue;
+        if (hullArea < minArea || hullArea > frameArea * 0.95) continue;
+        
+        // Solidity check: A real document is mostly a solid rectangle.
+        // If the contour area is much smaller than its convex hull, it's a jagged blob (like a bedsheet).
+        const solidity = cntArea / hullArea;
+        if (solidity < 0.85) continue;
+
         if (hullArea <= maxArea) continue;
 
         maxArea      = hullArea;
@@ -120,7 +129,8 @@ export class DocumentDetector {
         const approx = mat(new cv.Mat());
         let found4   = false;
 
-        for (let eps = 0.02; eps <= 0.12; eps += 0.01) {
+        // Tighter epsilon (0.02 - 0.08) because solidity check handles the junk
+        for (let eps = 0.02; eps <= 0.08; eps += 0.01) {
           cv.approxPolyDP(hull, approx, eps * peri, true);
           if (approx.rows === 4) { found4 = true; break; }
         }

@@ -439,7 +439,7 @@ export default function DocumentScanner({ expectedDocumentType = "income_certifi
             />
             <canvas 
               ref={overlayCanvasRef}
-              className={`absolute inset-0 w-full h-full pointer-events-none transition-opacity ${scannerState >= SCANNER_STATES.CAPTURING ? 'opacity-0' : 'opacity-100'}`}
+              className={`absolute inset-0 w-full h-full pointer-events-none transition-opacity ${DONE_STATES.has(scannerState) ? 'opacity-0' : 'opacity-100'}`}
             />
             
             <div className="absolute bottom-12 left-4 right-4 text-center pointer-events-none z-30">
