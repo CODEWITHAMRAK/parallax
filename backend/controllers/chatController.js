@@ -4,7 +4,7 @@ import User from "../models/User.js";
 export const handleChat = async (req, res) => {
   try {
     const { userInput, context } = req.body;
-    
+
     if (!userInput) {
       return res.status(400).json({ message: "User input is required" });
     }
@@ -16,7 +16,7 @@ export const handleChat = async (req, res) => {
         userLanguage = user.preferredLanguage;
       }
     }
-    
+
     context.language = userLanguage;
 
     const action = await getLLMAction(userInput, context);

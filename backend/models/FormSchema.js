@@ -12,6 +12,7 @@ const FieldSchema = new mongoose.Schema({
 const StepSchema = new mongoose.Schema({
   id: { type: String, required: true },
   title: { type: String, required: true },
+  autofill_document_type: { type: String, required: false }, // Instructs the LLM on which document can autofill this step
   fields: [FieldSchema]
 });
 

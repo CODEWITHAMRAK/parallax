@@ -97,8 +97,11 @@ export function useVoice() {
       await voiceService.speak(text, langCode, onPlaybackStart);
       setState(prev => prev === VoiceState.SPEAKING ? VoiceState.IDLE : prev);
     } catch (err) {
-      console.error('TTS Error:', err);
+      if (err.message !== "INTERRUPTED") {
+          console.error('TTS Error:', err);
+      }
       setState(prev => prev === VoiceState.SPEAKING ? VoiceState.IDLE : prev);
+      throw err;
     }
   }, []);
 
@@ -110,8 +113,11 @@ export function useVoice() {
       await voiceService.playSystemAudio(type, langCode);
       setState(prev => prev === VoiceState.SPEAKING ? VoiceState.IDLE : prev);
     } catch (err) {
-      console.error('System Audio Error:', err);
+      if (err.message !== "INTERRUPTED") {
+          console.error('System Audio Error:', err);
+      }
       setState(prev => prev === VoiceState.SPEAKING ? VoiceState.IDLE : prev);
+      throw err;
     }
   }, []);
 

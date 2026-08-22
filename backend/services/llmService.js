@@ -32,7 +32,7 @@ ${JSON.stringify(context, null, 2)}
 
 Instructions:
 1. Analyze the context (current_page, current_step fields vs form_values) and the provided 'chat_history' to understand the user's intent.
-2. In your "reasoning" block, strictly perform this verification but keep it extremely brief (under 20 words total): identify input, target field/step, completeness, and chosen action.
+2. In your "reasoning" block, strictly perform this verification but keep it extremely brief (under 10 words total): identify input, target field/step, completeness, and chosen action.
 3. Keep your conversational 'message' concise, natural, and helpful (around 20-30 words, 1-2 sentences). Feel like a polite human guide.
 4. HOME PAGE INTENT RULE:
    - When on the home page ('current_page': 'home'), ONLY output the NAVIGATE_PAGE action (target: 'scholarship_form') if the user explicitly commanded to open, start, or apply for the scholarship/form. If the input is silence, a general greeting, or unclear, output CHAT and stay on the home page.
@@ -67,11 +67,14 @@ You MUST return ONLY valid JSON matching this exact schema:
   "target": "optional_target (e.g. for NAVIGATE_STEP, NAVIGATE_PAGE, CLEAR_FIELD)",
   "message": "Step transition announcement first, then question for details, strictly in ${userLanguage}"
 }
-CRITICAL: For fields requiring specific formats (like "YYYY-MM-DD" for dates), you must format the extracted value strictly as requested. If the user provides multiple pieces of information, extract ALL of them into the "filled_fields" object (all in ENGLISH), even if your main action is NAVIGATE_STEP, NEXT, or CHAT. Your conversational 'message' MUST NEVER mention technical formats.`;
+CRITICAL: For fields requiring specific formats (like "YYYY-MM-DD" for dates), you must format the extracted value strictly as requested. If the user provides multiple pieces of information, extract ALL of them into the "filled_fields" object (all in ENGLISH), even if your main action is NAVIGATE_STEP, NEXT, or CHAT. Your conversational 'message' MUST NEVER mention technical formats.
+CRITICAL: The "message" field MUST be the very LAST key in the JSON object, and do NOT use quotes inside the message string.`;
 
   try {
     const chatHistory = context.chat_history || [];
-    const formattedHistory = chatHistory.map(msg => ({
+    // Keep only the last 6 messages (3 turns) to prevent context bloat and speed up inference
+    const recentHistory = chatHistory.slice(-6);
+    const formattedHistory = recentHistory.map(msg => ({
       role: msg.role === 'assistant' ? 'assistant' : 'user',
       content: msg.content
     }));
@@ -127,3 +130,161 @@ CRITICAL: For fields requiring specific formats (like "YYYY-MM-DD" for dates), y
     throw error;
   }
 };
+
+export const getLLMActionStream = async (userInput, context, onSentence) => {
+  const apiKey = process.env.MIMO_API_KEY;
+  if (!apiKey) throw new Error("MIMO_API_KEY is not defined");
+
+  const userLanguage = context.language || "English";
+  const systemPrompt = `You are a conversational dialogue manager and navigation engine for an accessibility web app.
+Your job is to interpret user input, determine the next appropriate step, and output a strict JSON structured action alongside a conversational message.
+You must ALWAYS respond in the user's selected language: ${userLanguage}. Ensure your conversational 'message' uses this language. Use simple, intuitive words with less jargon.
+
+Supported actions:
+- CHAT: For general conversation, greeting, clarifying, or asking for the next field.
+- NAVIGATE_STEP: target (step id)
+- NEXT: Move to next step
+- PREVIOUS: Move to previous step
+- FILL_FIELD: Use when successfully extracting form data. Put extracted data into 'filled_fields'.
+- CLEAR_FIELD: target (field id to clear, or 'all')
+- SELECT_OPTION: Use when extracting a dropdown selection. Put extracted data into 'filled_fields'.
+- READ_FIELD: target (field id)
+- EXPLAIN_FIELD: target (field id)
+- UPLOAD_DOCUMENT: field (field id)
+- OPEN_SCANNER: target (field id or 'autofill')
+- OPEN_FILE_PICKER: target (field id or 'autofill')
+- SUBMIT
+- NAVIGATE_PAGE: target (page id, e.g. 'home', 'scholarship_form')
+- RESTART_FORM: Clears the entire form and starts over
+
+Context provided:
+${JSON.stringify(context, null, 2)}
+
+Instructions:
+1. Analyze the context (current_page, current_step fields vs form_values) and the provided 'chat_history' to understand the user's intent.
+2. Keep your conversational 'message' concise, natural, and helpful (around 10-20 words, 1-2 short sentences).
+3. FORM INTRODUCTION & STEP GUIDANCE RULES:
+   - When entering the first step, introduce the form briefly. Let them know they can tell details or scan documents.
+   - When transitioning to subsequent steps, state the step name. Remind they can tell details or scan. DO NOT read out specific field names.
+4. When user provides details, extract ALL mentioned values into 'filled_fields' (in ENGLISH).
+5. CRITICAL FORM FIELD LANGUAGE RULE: All field values in "filled_fields" MUST ALWAYS be in English.
+6. CRITICAL CONVERSATION LANGUAGE RULE: The 'message' field MUST ALWAYS be strictly in ${userLanguage}. Translate your thoughts into ${userLanguage} before returning.
+7. NATURAL PHRASING RULE: Use friendly words like 'tell me', 'say' in ${userLanguage}. Avoid rigid words like 'speak'.
+
+You MUST return ONLY valid JSON matching this schema:
+{
+  "reasoning": "Brief verification (under 10 words)...",
+  "action": "ACTION_NAME",
+  "filled_fields": {
+    "optional_field_id": "extracted_value_in_ENGLISH"
+  },
+  "target": "optional_target",
+  "message": "Step transition announcement first, then question for details, strictly in ${userLanguage}"
+}
+CRITICAL: The "message" field MUST be the very LAST key in the JSON object, and do NOT use quotes inside the message string.`;
+
+  try {
+    const chatHistory = context.chat_history || [];
+    const recentHistory = chatHistory.slice(-6);
+    const formattedHistory = recentHistory.map(msg => ({
+      role: msg.role === 'assistant' ? 'assistant' : 'user',
+      content: msg.content
+    }));
+
+    const response = await fetch("https://api.xiaomimimo.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "api-key": apiKey,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model: "mimo-v2.5",
+        messages: [
+          { role: "system", content: systemPrompt },
+          ...formattedHistory,
+          { role: "user", content: userInput }
+        ],
+        max_tokens: 512,
+        temperature: 0.5,
+        stream: true,
+        thinking: {type: "disabled"}
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`LLM Streaming API Error: ${response.status} ${await response.text()}`);
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+    
+    let fullContent = "";
+    let processedMessageLength = 0;
+    let messageBuffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      
+      const chunkStr = decoder.decode(value, { stream: true });
+      const lines = chunkStr.split("\n");
+      
+      for (const line of lines) {
+        if (line.startsWith("data: ") && line !== "data: [DONE]") {
+          try {
+            const data = JSON.parse(line.slice(6));
+            if (data.choices && data.choices[0].delta && data.choices[0].delta.content) {
+              fullContent += data.choices[0].delta.content;
+              
+              // Try to extract the message field so far
+              const msgMatch = fullContent.match(/"message"\s*:\s*"((?:[^"\\]|\\.)*)/);
+              if (msgMatch) {
+                const currentMessage = msgMatch[1];
+                const newText = currentMessage.slice(processedMessageLength);
+                
+                if (newText.length > 0) {
+                  messageBuffer += newText;
+                  processedMessageLength = currentMessage.length;
+                  
+                  // Check for sentence boundaries: ., ?, !, or Kannada/Hindi danda (।)
+                  const boundaryMatch = messageBuffer.match(/([.?!।]+[\s]*)/);
+                  if (boundaryMatch) {
+                    const boundaryIndex = boundaryMatch.index + boundaryMatch[0].length;
+                    const sentence = messageBuffer.slice(0, boundaryIndex).trim();
+                    messageBuffer = messageBuffer.slice(boundaryIndex);
+                    
+                    if (sentence.length > 0) {
+                      // Unescape any escaped characters (like \n or \")
+                      const cleanSentence = sentence.replace(/\\n/g, ' ').replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+                      onSentence(cleanSentence);
+                    }
+                  }
+                }
+              }
+            }
+          } catch (e) {
+            // ignore partial json parse errors from SSE chunk
+          }
+        }
+      }
+    }
+    
+    // Flush remaining buffer
+    if (messageBuffer.trim().length > 0) {
+      const cleanSentence = messageBuffer.trim().replace(/\\n/g, ' ').replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+      onSentence(cleanSentence);
+    }
+
+    // Finally, extract the JSON object
+    const jsonMatch = fullContent.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      throw new Error(`Failed to find JSON object in LLM response: ${fullContent}`);
+    }
+
+    return JSON.parse(jsonMatch[0]);
+  } catch (error) {
+    console.error("Error in getLLMActionStream:", error);
+    throw error;
+  }
+};
+

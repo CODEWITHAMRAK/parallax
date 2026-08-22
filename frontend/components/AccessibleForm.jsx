@@ -84,11 +84,14 @@ export default function AccessibleForm({ formId }) {
     const fetchingRef = useRef(false);
 
     useEffect(() => {
-        useNavigationStore.getState().setPage('form');
+        useNavigationStore.getState().setPage("form");
     }, []);
 
     useEffect(() => {
-        const hasAssistantGreeting = stepHistory && stepHistory[currentStepIndex] && stepHistory[currentStepIndex].some(m => m.role === 'assistant');
+        const hasAssistantGreeting =
+            stepHistory &&
+            stepHistory[currentStepIndex] &&
+            stepHistory[currentStepIndex].some((m) => m.role === "assistant");
 
         if (
             schema &&
@@ -99,9 +102,11 @@ export default function AccessibleForm({ formId }) {
         ) {
             fetchingRef.current = true;
             setSystemMessage("", true);
-            
+
             // Pause mic while fetching auto-greeting for the new step
-            const currentMode = document.getElementById("interaction-mode-indicator")?.dataset?.mode;
+            const currentMode = document.getElementById(
+                "interaction-mode-indicator",
+            )?.dataset?.mode;
             if (currentMode === "voice") {
                 pauseListening(false);
             }
@@ -120,22 +125,32 @@ export default function AccessibleForm({ formId }) {
                         form_values: useFormStore.getState().values,
                         available_steps: schema.steps.map((s) => s.id),
                     };
-                    const promptMsg = currentStepIndex === 0
-                        ? "I just started the application. Please introduce the scholarship form and let me know I can tell you my details or scan/upload documents to autofill."
-                        : `I just entered the ${currentStep.title} step. Please briefly announce this step and remind me I can tell you my details or scan/upload documents.`;
+                    const docType = currentStep.autofill_document_type ? ` You can ask them to upload their ${currentStep.autofill_document_type} to autofill this step.` : "";
+                    
+                    const promptMsg =
+                        currentStepIndex === 0
+                            ? `I just started the application. Please introduce the form and let me know I can tell you my details or scan/upload documents to autofill.${docType}`
+                            : `I just entered the ${currentStep.title} step. Please briefly announce this step and remind me I can tell you my details or scan/upload documents.${docType}`;
 
-                    const action = await fetchChatAction(
-                        promptMsg,
-                        context,
-                    );
+                    const action = await fetchChatAction(promptMsg, context);
                     if (action.message) {
                         setSystemMessage(action.message);
                         if (currentMode === "voice") {
                             speak(action.message).then(() => {
-                                const modeAfter = document.getElementById("interaction-mode-indicator")?.dataset?.mode;
+                                const modeAfter = document.getElementById(
+                                    "interaction-mode-indicator",
+                                )?.dataset?.mode;
                                 if (modeAfter === "voice") {
-                                    window.dispatchEvent(new Event("start-voice-turn"));
+                                    window.dispatchEvent(
+                                        new Event("start-voice-turn"),
+                                    );
                                 }
+                            }).catch((err) => {
+                                if (err.message === "INTERRUPTED") {
+                                    console.log("TTS interrupted in AccessibleForm. Aborting voice turn trigger.");
+                                    return;
+                                }
+                                console.error(err);
                             });
                         }
                     } else if (currentMode === "voice") {
@@ -152,7 +167,15 @@ export default function AccessibleForm({ formId }) {
             };
             fetchGreeting();
         }
-    }, [currentStepIndex, schema, stepHistory, setSystemMessage, draftLoaded, speak, pauseListening]);
+    }, [
+        currentStepIndex,
+        schema,
+        stepHistory,
+        setSystemMessage,
+        draftLoaded,
+        speak,
+        pauseListening,
+    ]);
 
     // Handle custom events for scanning and picking files
     useEffect(() => {
@@ -178,7 +201,6 @@ export default function AccessibleForm({ formId }) {
                 );
                 if (field) setActiveFileTarget(field);
             }
-            if (fileInputRef.current) fileInputRef.current.click();
         };
 
         window.addEventListener("trigger-scanner", handleTriggerScanner);
@@ -194,7 +216,10 @@ export default function AccessibleForm({ formId }) {
     }, [schema, currentStepIndex]);
 
     const processFileToDataUrl = async (file) => {
-        if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
+        if (
+            file.type === "application/pdf" ||
+            file.name.toLowerCase().endsWith(".pdf")
+        ) {
             try {
                 const pdfjsLib = await import("pdfjs-dist");
                 pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
@@ -211,7 +236,9 @@ export default function AccessibleForm({ formId }) {
                 return canvas.toDataURL("image/jpeg", 0.92);
             } catch (err) {
                 console.error("PDF rendering error:", err);
-                throw new Error("Could not process PDF file. Please upload an image or scan with camera.");
+                throw new Error(
+                    "Could not process PDF file. Please upload an image or scan with camera.",
+                );
             }
         }
 
@@ -230,7 +257,10 @@ export default function AccessibleForm({ formId }) {
                 img.onerror = () => {
                     let raw = e.target.result;
                     if (raw && raw.startsWith("data:image/jpg;")) {
-                        raw = raw.replace("data:image/jpg;", "data:image/jpeg;");
+                        raw = raw.replace(
+                            "data:image/jpg;",
+                            "data:image/jpeg;",
+                        );
                     }
                     resolve(raw);
                 };
@@ -252,7 +282,8 @@ export default function AccessibleForm({ formId }) {
                 await handleProcessDocument(dataUrl, target);
             } catch (err) {
                 console.error(err);
-                const msg = "SYSTEM: Document upload processing failed. Politely tell the user that the document could not be read, and ask them to tell the first missing required field or try scanning again.";
+                const msg =
+                    "SYSTEM: Document upload processing failed. Explain that the document could not be read clearly, and politely ask them to try scanning again or tell the details directly. DO NOT tell them to skip the section.";
                 await dispatchBackgroundSystemMessage(msg);
             }
         }
@@ -287,6 +318,10 @@ export default function AccessibleForm({ formId }) {
                                 ),
                             200,
                         );
+                    }).catch((err) => {
+                        if (err.message !== "INTERRUPTED") {
+                            console.error(err);
+                        }
                     });
                 }
             }
@@ -322,7 +357,7 @@ export default function AccessibleForm({ formId }) {
                     const msg = `SYSTEM: Document autofill complete. Extracted: ${JSON.stringify(response.extractedData)}. Say the fields you extracted and ask for any remaining required fields.`;
                     await dispatchBackgroundSystemMessage(msg);
                 } else {
-                    const msg = `SYSTEM: Document autofill failed. Reason: ${response.reason || "Image unreadable"}. Politely tell the user to try again or tell the details directly.`;
+                    const msg = `SYSTEM: Document autofill failed. Reason: ${response.reason || "Image unreadable"}. Politely explain what went wrong and how they can fix it (e.g. better lighting, correct document). DO NOT tell them to skip the section.`;
                     await dispatchBackgroundSystemMessage(msg);
                 }
             } else {
@@ -351,13 +386,13 @@ export default function AccessibleForm({ formId }) {
                     const msg = `SYSTEM: Document verified and uploaded successfully for ${target.label}. Move to next step or ask for next missing field.`;
                     await dispatchBackgroundSystemMessage(msg);
                 } else {
-                    const msg = `SYSTEM: Document verification failed for ${target.label}. Reason: ${verifyResult.reason}. Ask user if they want to retry scanning/uploading or skip.`;
+                    const msg = `SYSTEM: Document verification failed for ${target.label}. Reason: ${verifyResult.reason}. Politely explain the specific issue and ask them to retry scanning/uploading. DO NOT tell them to skip the section.`;
                     await dispatchBackgroundSystemMessage(msg);
                 }
             }
         } catch (err) {
             console.error("handleProcessDocument error:", err);
-            const msg = `SYSTEM: Document processing encountered an error. Politely tell the user that the document image could not be processed, and ask them to tell the first missing required field or try scanning again.`;
+            const msg = `SYSTEM: Document processing encountered an error. Explain that the system had trouble processing the document image, and politely ask them to try scanning again. DO NOT tell them to skip the section.`;
             await dispatchBackgroundSystemMessage(msg);
         } finally {
             setIsProcessing(false);
@@ -422,7 +457,11 @@ export default function AccessibleForm({ formId }) {
                             Step {currentStepIndex + 1} of {schema.steps.length}
                         </span>
                         <span className="text-xs md:text-sm font-bold text-slate-500">
-                            {Math.round(((currentStepIndex + 1) / schema.steps.length) * 100)}% Complete
+                            {Math.round(
+                                ((currentStepIndex + 1) / schema.steps.length) *
+                                    100,
+                            )}
+                            % Complete
                         </span>
                     </div>
 
@@ -431,23 +470,25 @@ export default function AccessibleForm({ formId }) {
                     </h2>
 
                     {/* Visual Progress Bar */}
-                    <div 
-                        className="w-full bg-slate-200 h-2.5 rounded-full overflow-hidden" 
-                        role="progressbar" 
-                        aria-valuenow={currentStepIndex + 1} 
-                        aria-valuemin={1} 
+                    <div
+                        className="w-full bg-slate-200 h-2.5 rounded-full overflow-hidden"
+                        role="progressbar"
+                        aria-valuenow={currentStepIndex + 1}
+                        aria-valuemin={1}
                         aria-valuemax={schema.steps.length}
                         aria-label={`Step ${currentStepIndex + 1} of ${schema.steps.length}`}
                     >
-                        <div 
+                        <div
                             className="bg-[#003441] h-full rounded-full transition-all duration-500 ease-out shadow-sm"
-                            style={{ width: `${((currentStepIndex + 1) / schema.steps.length) * 100}%` }}
+                            style={{
+                                width: `${((currentStepIndex + 1) / schema.steps.length) * 100}%`,
+                            }}
                         />
                     </div>
                 </div>
 
                 {/* Impairment-Friendly Big Button Autofill Bar */}
-                {currentStep.fields.some(f => f.type !== 'file') && (
+                {currentStep.fields.some((f) => f.type !== "file") && (
                     <div className="mb-8 p-4 md:p-5 rounded-2xl bg-[#003441]/5 border-2 border-[#003441]/20">
                         <div className="flex items-center gap-2 mb-3">
                             <Sparkles className="w-5 h-5 text-[#003441]" />
@@ -459,7 +500,9 @@ export default function AccessibleForm({ formId }) {
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 md:gap-4">
                             <Button
                                 type="button"
-                                onClick={() => setActiveScannerTarget("autofill")}
+                                onClick={() =>
+                                    setActiveScannerTarget("autofill")
+                                }
                                 className="h-16 md:h-18 px-6 rounded-2xl bg-[#003441] hover:bg-[#002833] text-white text-lg md:text-xl font-bold flex items-center justify-center gap-3 shadow-md hover:scale-[1.01] active:scale-[0.98] transition-all"
                             >
                                 <Camera className="w-6 h-6 md:w-7 md:h-7 shrink-0" />
@@ -622,6 +665,44 @@ export default function AccessibleForm({ formId }) {
                     onCancel={() => setActiveScannerTarget(null)}
                     onConfirm={handleScannerConfirm}
                 />
+            )}
+
+            {activeFileTarget && (
+                <div className="fixed inset-0 z-50 bg-background/95 backdrop-blur-sm flex flex-col items-center justify-center p-6">
+                    <div className="bg-white p-8 md:p-12 rounded-[2.5rem] shadow-2xl border-4 border-slate-200 max-w-lg w-full text-center space-y-6">
+                        <div className="w-24 h-24 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-2">
+                            <Upload className="w-12 h-12 text-primary" />
+                        </div>
+                        <h2 className="text-3xl md:text-4xl font-bold text-slate-800">
+                            Upload Document
+                        </h2>
+                        <p className="text-xl text-slate-600 font-medium">
+                            Please select the document file to upload for{" "}
+                            {activeFileTarget === "autofill"
+                                ? "auto-filling this step"
+                                : activeFileTarget?.label || "this field"}
+                            .
+                        </p>
+                        <div className="flex flex-col gap-4 mt-8">
+                            <Button
+                                onClick={() => {
+                                    if (fileInputRef.current)
+                                        fileInputRef.current.click();
+                                }}
+                                className="h-20 text-2xl bg-primary hover:bg-primary/90 text-white font-bold rounded-2xl shadow-md transition-all active:scale-[0.98]"
+                            >
+                                Choose File
+                            </Button>
+                            <Button
+                                variant="outline"
+                                onClick={() => setActiveFileTarget(null)}
+                                className="h-16 text-xl border-4 border-slate-200 text-slate-600 font-bold rounded-2xl hover:bg-slate-50 transition-all"
+                            >
+                                Cancel
+                            </Button>
+                        </div>
+                    </div>
+                </div>
             )}
         </div>
     );

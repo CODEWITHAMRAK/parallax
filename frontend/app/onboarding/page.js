@@ -176,8 +176,13 @@ export default function LanguageSelectionPage() {
     try {
       await playSystemAudio('ask_language'); // Plays our pre-saved English, Kannada, Hindi audio
     } catch (err) {
+      if (err.message === "INTERRUPTED") return;
       console.warn("Could not play ask_language, trying TTS directly...", err);
-      await speak("Please choose your language. Which language do you speak? ನೀವು ಯಾವ ಭಾಷೆಯನ್ನು ಮಾತನಾಡುತ್ತೀರಿ? आप कौन सी भाषा बोलते हैं?");
+      try {
+          await speak("Please choose your language. Which language do you speak? ನೀವು ಯಾವ ಭಾಷೆಯನ್ನು ಮಾತನಾಡುತ್ತೀರಿ? आप कौन सी भाषा बोलते हैं?");
+      } catch (e) {
+          if (e.message === "INTERRUPTED") return;
+      }
     }
 
     setVoiceStatusMsg("Listening... (Tell me your language)");
@@ -190,7 +195,12 @@ export default function LanguageSelectionPage() {
       try {
         await playSystemAudio('are_you_there');
       } catch (e) {
-        await speak("Are you still there? Please tell me which language you speak.");
+        if (e.message === "INTERRUPTED") return;
+        try {
+            await speak("Are you still there? Please tell me which language you speak.");
+        } catch (err) {
+            if (err.message === "INTERRUPTED") return;
+        }
       }
       setTimeout(() => startVoiceLanguageSelection(), 400);
     }, 7000);

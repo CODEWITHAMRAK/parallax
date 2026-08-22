@@ -45,13 +45,26 @@ export const executeAction = (action, router) => {
       if (action.target === 'home') {
         navStore.setPage('home');
         router.push('/home');
-        navStore.setSystemMessage(action.message || t('navigating_home'));
-      } else if (action.target === 'scholarship_application' || action.target === 'form' || action.target === 'scholarship_form') {
+        navStore.setSystemMessage(action.message || "Navigating home.");
+      } else if (action.target === 'scholarship_application' || action.target === 'national_scholarship' || action.target === 'scholarship' || action.target === 'scholarship_form') {
         navStore.setPage('form');
-        router.push('/form/scholarship_application');
-        navStore.setSystemMessage(action.message || t('opening_form'), true);
+        router.push('/form/national_scholarship');
+        navStore.setSystemMessage(action.message || "Opening National Scholarship Form.", true);
+      } else if (action.target === 'education_loan' || action.target === 'loan' || action.target === 'loan_form') {
+        navStore.setPage('form');
+        router.push('/form/education_loan');
+        navStore.setSystemMessage(action.message || "Opening Education Loan Form.", true);
+      } else if (action.target === 'bus_pass' || action.target === 'bus_pass_application' || action.target === 'bus_pass_form') {
+        navStore.setPage('form');
+        router.push('/form/bus_pass');
+        navStore.setSystemMessage(action.message || "Opening Student Bus Pass Application.", true);
+      } else if (action.target) {
+        const cleanTarget = action.target.replace(/^\/form\//, '');
+        navStore.setPage('form');
+        router.push(`/form/${cleanTarget}`);
+        navStore.setSystemMessage(action.message || `Opening ${cleanTarget}.`, true);
       } else {
-        navStore.setSystemMessage(action.message || t('page_not_found', { target: action.target }));
+        navStore.setSystemMessage(action.message || "Page not found.");
       }
       break;
 

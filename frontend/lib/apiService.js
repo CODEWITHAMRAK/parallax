@@ -1,5 +1,13 @@
 import { apiFetch } from "./api.js";
 
+export const fetchAllSchemas = async () => {
+  const response = await apiFetch(`/api/schemas`);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch schemas: ${response.statusText}`);
+  }
+  return await response.json();
+};
+
 export const fetchFormSchema = async (formId) => {
   const response = await apiFetch(`/api/schemas/${formId}`);
   if (!response.ok) {

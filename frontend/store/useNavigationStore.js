@@ -11,7 +11,9 @@ const useNavigationStore = create(
       lastAction: null,
       systemMessage: "Welcome to Parallax. How can I help you today?",
       stepHistory: {}, // cache for step conversational history [{role, content}]
+      availableForms: [], // store titles of available forms
 
+      setAvailableForms: (forms) => set({ availableForms: forms }),
       setLanguage: (lang) => set({ language: lang }),
 
       setPage: (pageId) => {

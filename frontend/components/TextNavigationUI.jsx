@@ -46,14 +46,17 @@ const StopIcon = () => (
     </svg>
 );
 
-export default function TextNavigationUI({ inline = false, isHomeVoiceOnly = false }) {
+export default function TextNavigationUI({
+    inline = false,
+    isHomeVoiceOnly = false,
+}) {
     const [input, setInput] = useState("");
     const [loading, setLoading] = useState(false);
     const { systemMessage, currentStepIndex, currentFieldId, currentPage } =
         useNavigationStore();
     const { schema, values } = useFormStore();
     const router = useRouter();
-    const t = useLocalizationStore(state => state.t);
+    const t = useLocalizationStore((state) => state.t);
 
     const {
         state: voiceState,
@@ -72,39 +75,48 @@ export default function TextNavigationUI({ inline = false, isHomeVoiceOnly = fal
 
     useEffect(() => {
         const handleStartVoice = () => {
-            const currentMode = document.getElementById('interaction-mode-indicator')?.dataset?.mode;
-            if (currentMode === 'voice') {
+            const currentMode = document.getElementById(
+                "interaction-mode-indicator",
+            )?.dataset?.mode;
+            if (currentMode === "voice") {
                 startVoiceTurn();
             }
         };
-        window.addEventListener('start-voice-turn', handleStartVoice);
-        return () => window.removeEventListener('start-voice-turn', handleStartVoice);
+        window.addEventListener("start-voice-turn", handleStartVoice);
+        return () =>
+            window.removeEventListener("start-voice-turn", handleStartVoice);
     }, []);
 
     const startVoiceTurn = async () => {
         console.log("[TextNavUI Debug] startVoiceTurn called.");
         if (voiceService.isSpeaking) {
-            console.log("[TextNavUI Debug] AI is currently speaking (or preparing to speak), aborting startVoiceTurn to prevent interruption.");
+            console.log(
+                "[TextNavUI Debug] AI is currently speaking (or preparing to speak), aborting startVoiceTurn to prevent interruption.",
+            );
             return;
         }
 
         if (noResponseTimerRef.current)
             clearTimeout(noResponseTimerRef.current);
-            
+
         isTimeoutRef.current = false;
 
         await startListening(
             // onSpeechEndCallback (receives transcribed text directly!)
             async (transcribed) => {
-                console.log("[TextNavUI Debug] onSpeechEndCallback fired from VAD!");
+                console.log(
+                    "[TextNavUI Debug] onSpeechEndCallback fired from VAD!",
+                );
                 if (noResponseTimerRef.current)
                     clearTimeout(noResponseTimerRef.current);
-                    
+
                 if (isTimeoutRef.current) {
-                    console.log("[TextNavUI Debug] Ignoring VAD end because of 8s timeout.");
+                    console.log(
+                        "[TextNavUI Debug] Ignoring VAD end because of 8s timeout.",
+                    );
                     return;
                 }
-                
+
                 if (transcribed) {
                     console.log(
                         `[TextNavUI Debug] Processing transcribed text: "${transcribed}"`,
@@ -115,12 +127,20 @@ export default function TextNavigationUI({ inline = false, isHomeVoiceOnly = fal
                     console.warn(
                         "[TextNavUI Debug] Transcription failed or returned empty. Prompting user with didnt_catch audio.",
                     );
-                    const msg = t('didnt_catch');
+                    const msg = t("didnt_catch");
                     useNavigationStore.getState().setSystemMessage(msg);
-                    await playSystemAudio('didnt_catch');
-                    const currentMode = document.getElementById('interaction-mode-indicator')?.dataset?.mode;
-                    if (currentMode === 'voice') {
-                        setTimeout(() => window.dispatchEvent(new Event('start-voice-turn')), 300);
+                    await playSystemAudio("didnt_catch");
+                    const currentMode = document.getElementById(
+                        "interaction-mode-indicator",
+                    )?.dataset?.mode;
+                    if (currentMode === "voice") {
+                        setTimeout(
+                            () =>
+                                window.dispatchEvent(
+                                    new Event("start-voice-turn"),
+                                ),
+                            300,
+                        );
                     }
                 }
             },
@@ -135,17 +155,24 @@ export default function TextNavigationUI({ inline = false, isHomeVoiceOnly = fal
         );
 
         noResponseTimerRef.current = setTimeout(async () => {
-            console.log("[TextNavUI Debug] 7s silence timer fired! Triggering are_you_there.");
+            console.log(
+                "[TextNavUI Debug] 7s silence timer fired! Triggering are_you_there.",
+            );
             isTimeoutRef.current = true;
             pauseListening(false); // Manually pause VAD without submitting noise
 
             console.log("[TextNavUI Debug] Prompting 'Are you still there?'");
-            const msg = t('still_there');
+            const msg = t("still_there");
             useNavigationStore.getState().setSystemMessage(msg);
-            await playSystemAudio('are_you_there');
-            const currentMode = document.getElementById('interaction-mode-indicator')?.dataset?.mode;
-            if (currentMode === 'voice') {
-                setTimeout(() => window.dispatchEvent(new Event('start-voice-turn')), 300);
+            await playSystemAudio("are_you_there");
+            const currentMode = document.getElementById(
+                "interaction-mode-indicator",
+            )?.dataset?.mode;
+            if (currentMode === "voice") {
+                setTimeout(
+                    () => window.dispatchEvent(new Event("start-voice-turn")),
+                    300,
+                );
             }
         }, 7000);
     };
@@ -153,30 +180,57 @@ export default function TextNavigationUI({ inline = false, isHomeVoiceOnly = fal
     const processInput = async (textToProcess) => {
         if (!textToProcess.trim()) return;
 
-        const normalized = textToProcess.trim().toLowerCase().replace(/[^a-z]/g, '');
-        if (['okay', 'ok', 'thankyou', 'you'].includes(normalized) && textToProcess.trim().split(/\s+/).length <= 2) {
-            console.warn("[TextNavUI Debug] Ignoring likely STT silence hallucination: ", textToProcess);
-            const currentMode = document.getElementById('interaction-mode-indicator')?.dataset?.mode;
-            if (currentMode === 'voice') window.dispatchEvent(new Event('start-voice-turn'));
+        const normalized = textToProcess
+            .trim()
+            .toLowerCase()
+            .replace(/[^a-z]/g, "");
+        if (
+            ["okay", "ok", "thankyou", "you"].includes(normalized) &&
+            textToProcess.trim().split(/\s+/).length <= 2
+        ) {
+            console.warn(
+                "[TextNavUI Debug] Ignoring likely STT silence hallucination: ",
+                textToProcess,
+            );
+            const currentMode = document.getElementById(
+                "interaction-mode-indicator",
+            )?.dataset?.mode;
+            if (currentMode === "voice")
+                window.dispatchEvent(new Event("start-voice-turn"));
             return;
         }
 
         const navState = useNavigationStore.getState();
         const formState = useFormStore.getState();
 
-        navState.addMessageToHistory(navState.currentStepIndex, "user", textToProcess);
+        navState.addMessageToHistory(
+            navState.currentStepIndex,
+            "user",
+            textToProcess,
+        );
         setLoading(true);
 
         try {
-            const isFormPage = navState.currentPage === 'form' || (typeof window !== 'undefined' && window.location.pathname.includes('/form/'));
-            const currentStep = (isFormPage && formState.schema) ? formState.schema.steps[navState.currentStepIndex] : null;
-            const currentField = (isFormPage && currentStep)
-                ? currentStep.fields.find((f) => f.id === navState.currentFieldId)
-                : null;
+            const isFormPage =
+                navState.currentPage === "form" ||
+                (typeof window !== "undefined" &&
+                    window.location.pathname.includes("/form/"));
+            const currentStep =
+                isFormPage && formState.schema
+                    ? formState.schema.steps[navState.currentStepIndex]
+                    : null;
+            const currentField =
+                isFormPage && currentStep
+                    ? currentStep.fields.find(
+                          (f) => f.id === navState.currentFieldId,
+                      )
+                    : null;
 
             const context = {
-                chat_history: isFormPage ? (navState.stepHistory[navState.currentStepIndex] || []) : [],
-                current_page: isFormPage ? 'form' : 'home',
+                chat_history: isFormPage
+                    ? navState.stepHistory[navState.currentStepIndex] || []
+                    : [],
+                current_page: isFormPage ? "form" : "home",
                 form_title: formState.schema?.title,
                 current_step: currentStep
                     ? {
@@ -193,7 +247,11 @@ export default function TextNavigationUI({ inline = false, isHomeVoiceOnly = fal
                       }
                     : null,
                 form_values: isFormPage ? formState.values : {},
-                available_steps: (isFormPage && formState.schema) ? formState.schema.steps.map((s) => s.id) : [],
+                available_steps:
+                    isFormPage && formState.schema
+                        ? formState.schema.steps.map((s) => s.id)
+                        : [],
+                available_forms: isFormPage ? [] : navState.availableForms,
                 language: navState.language,
             };
 
@@ -204,8 +262,8 @@ export default function TextNavigationUI({ inline = false, isHomeVoiceOnly = fal
 
             // Explicitly speak only if in voice mode
             if (action.message && currentMode === "voice") {
-                const isScannerAction = action.action === "OPEN_SCANNER";
-                
+                const isScannerAction = action.action === "OPEN_SCANNER" || action.action === "OPEN_FILE_PICKER";
+
                 // For non-scanner actions, execute immediately so UI responds while speaking
                 if (!isScannerAction) {
                     executeAction(action, router);
@@ -224,7 +282,7 @@ export default function TextNavigationUI({ inline = false, isHomeVoiceOnly = fal
                         "interaction-mode-indicator",
                     )?.dataset?.mode;
                     if (modeAfterSpeak === "voice") {
-                        window.dispatchEvent(new Event('start-voice-turn'));
+                        window.dispatchEvent(new Event("start-voice-turn"));
                     }
                 }
             } else {
@@ -234,12 +292,14 @@ export default function TextNavigationUI({ inline = false, isHomeVoiceOnly = fal
 
             setInput("");
         } catch (error) {
+            if (error.message === "INTERRUPTED") {
+                console.log("[TextNavUI] TTS interrupted. Aborting voice turn trigger.");
+                return;
+            }
             console.error(error);
             useNavigationStore
                 .getState()
-                .setSystemMessage(
-                    t('connection_trouble'),
-                );
+                .setSystemMessage(t("connection_trouble"));
             setLoading(false);
         }
     };
@@ -250,8 +310,12 @@ export default function TextNavigationUI({ inline = false, isHomeVoiceOnly = fal
     };
 
     const handleVoiceAction = async () => {
-        if (voiceState === VoiceState.LISTENING || voiceState === VoiceState.PREPARING) {
-            if (noResponseTimerRef.current) clearTimeout(noResponseTimerRef.current);
+        if (
+            voiceState === VoiceState.LISTENING ||
+            voiceState === VoiceState.PREPARING
+        ) {
+            if (noResponseTimerRef.current)
+                clearTimeout(noResponseTimerRef.current);
             if (interactionMode === "voice") {
                 isTimeoutRef.current = true;
                 pauseListening(false);
@@ -322,14 +386,20 @@ export default function TextNavigationUI({ inline = false, isHomeVoiceOnly = fal
                 <div className="lg:hidden flex items-center justify-between gap-3 w-full py-1">
                     <div className="flex items-center gap-2.5 min-w-0 flex-1">
                         <div className="w-8 h-8 rounded-full bg-white border border-slate-200 shadow-sm flex items-center justify-center shrink-0 p-1">
-                            <img 
-                                src="/logo.png" 
-                                alt="Parallax" 
+                            <img
+                                src="/logo.png"
+                                alt="Parallax"
                                 className="w-full h-full object-contain"
                             />
                         </div>
                         <p className="text-xs text-slate-700 font-medium truncate">
-                            {isListening ? "Listening..." : (isProcessing || loading) ? "Processing..." : isSpeaking ? "Speaking..." : systemMessage || "Assistant ready"}
+                            {isListening
+                                ? "Listening..."
+                                : isProcessing || loading
+                                  ? "Processing..."
+                                  : isSpeaking
+                                    ? "Speaking..."
+                                    : systemMessage || "Assistant ready"}
                         </p>
                     </div>
 
@@ -338,11 +408,17 @@ export default function TextNavigationUI({ inline = false, isHomeVoiceOnly = fal
                             onClick={handleVoiceAction}
                             disabled={disableVoice}
                             className={`w-11 h-11 rounded-full flex items-center justify-center text-white shadow-md transition-all ${
-                                isListening ? "bg-primary animate-pulse scale-105" : "bg-[#003441]"
+                                isListening
+                                    ? "bg-primary animate-pulse scale-105"
+                                    : "bg-[#003441]"
                             }`}
                             aria-label="Toggle Voice"
                         >
-                            {isListening || isSpeaking ? <StopIcon /> : <MicIcon />}
+                            {isListening || isSpeaking ? (
+                                <StopIcon />
+                            ) : (
+                                <MicIcon />
+                            )}
                         </button>
 
                         <button
@@ -360,13 +436,19 @@ export default function TextNavigationUI({ inline = false, isHomeVoiceOnly = fal
                         <div className="flex justify-between items-center text-sm mb-1 md:mb-2 border-b border-border pb-2 md:pb-4">
                             <div className="inline-flex items-center p-0.5 bg-slate-100 rounded-full border border-slate-200 shadow-inner">
                                 <button
-                                    onClick={() => interactionMode !== 'voice' && toggleInteractionMode()}
+                                    onClick={() =>
+                                        interactionMode !== "voice" &&
+                                        toggleInteractionMode()
+                                    }
                                     className={`px-2.5 sm:px-3 py-1 text-xs font-bold rounded-full transition-all ${interactionMode === "voice" ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
                                 >
                                     Voice Mode
                                 </button>
                                 <button
-                                    onClick={() => interactionMode !== 'text' && toggleInteractionMode()}
+                                    onClick={() =>
+                                        interactionMode !== "text" &&
+                                        toggleInteractionMode()
+                                    }
                                     className={`px-2.5 sm:px-3 py-1 text-xs font-bold rounded-full transition-all ${interactionMode === "text" ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
                                 >
                                     Text Mode
@@ -397,7 +479,7 @@ export default function TextNavigationUI({ inline = false, isHomeVoiceOnly = fal
                                     ? "Warming up mic..."
                                     : isListening
                                       ? "Listening... (Speak now)"
-                                      : (isProcessing || loading)
+                                      : isProcessing || loading
                                         ? "Processing..."
                                         : isSpeaking
                                           ? "Assistant Speaking..."
@@ -409,19 +491,23 @@ export default function TextNavigationUI({ inline = false, isHomeVoiceOnly = fal
                     {/* System Message */}
                     <div className="flex items-start gap-2.5 md:gap-4">
                         <div className="w-8 h-8 md:w-12 md:h-12 rounded-full bg-white border border-slate-200 shadow-sm flex items-center justify-center shrink-0 p-1 md:p-1.5 overflow-hidden">
-                            <img 
-                                src="/logo.png" 
-                                alt="Parallax Assistant" 
+                            <img
+                                src="/logo.png"
+                                alt="Parallax Assistant"
                                 className="w-full h-full object-contain"
                             />
                         </div>
                         <div className="flex-1 bg-muted rounded-xl md:rounded-2xl p-3 md:p-5 rounded-tl-sm text-foreground text-sm md:text-lg font-medium shadow-sm max-h-[140px] md:max-h-none overflow-y-auto">
                             {loading || isProcessing ? (
-                                <span className="animate-pulse">Processing...</span>
+                                <span className="animate-pulse">
+                                    Processing...
+                                </span>
                             ) : systemMessage ? (
                                 systemMessage
                             ) : (
-                                <span className="animate-pulse">Loading...</span>
+                                <span className="animate-pulse">
+                                    Loading...
+                                </span>
                             )}
                         </div>
                     </div>
@@ -454,7 +540,11 @@ export default function TextNavigationUI({ inline = false, isHomeVoiceOnly = fal
                                       : "Start Voice Input"
                             }
                         >
-                            {isListening || isSpeaking ? <StopIcon /> : <MicIcon />}
+                            {isListening || isSpeaking ? (
+                                <StopIcon />
+                            ) : (
+                                <MicIcon />
+                            )}
                         </button>
 
                         {/* Text Input (Secondary) - Hidden in Voice Mode & Home Voice Only */}

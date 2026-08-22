@@ -1,84 +1,135 @@
 "use client";
 
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import TextNavigationUI from '@/components/TextNavigationUI.jsx';
 import useNavigationStore from '@/store/useNavigationStore.js';
 import useLocalizationStore from '@/store/useLocalizationStore.js';
 import { useVoiceStore, useVoice } from '@/hooks/useVoice.js';
-import { Button } from '@/components/ui/button.jsx';
 import { useRouter } from 'next/navigation';
+import { GraduationCap, Landmark, Bus, FileText } from 'lucide-react';
+import { fetchAllSchemas } from '@/lib/apiService.js';
+
+// Color and icon mapping for specific forms to aid cognitive inclusivity
+const getFormStyling = (formId) => {
+  switch (formId) {
+    case 'national_scholarship':
+      return { color: 'bg-emerald-100 hover:bg-emerald-200 border-emerald-300 text-emerald-900', icon: GraduationCap };
+    case 'education_loan':
+      return { color: 'bg-purple-100 hover:bg-purple-200 border-purple-300 text-purple-900', icon: Landmark };
+    case 'bus_pass':
+      return { color: 'bg-blue-100 hover:bg-blue-200 border-blue-300 text-blue-900', icon: Bus };
+    default:
+      return { color: 'bg-slate-100 hover:bg-slate-200 border-slate-300 text-slate-900', icon: FileText };
+  }
+};
 
 export default function HomePage() {
-  const { setPage, setSystemMessage, language } = useNavigationStore();
+  const { setPage, setSystemMessage, language, setAvailableForms } = useNavigationStore();
   const { interactionMode } = useVoiceStore();
   const { playSystemAudio, pauseListening } = useVoice();
   const t = useLocalizationStore(state => state.t);
   const router = useRouter();
+
+  const [forms, setForms] = useState([]);
+  const [loading, setLoading] = useState(true);
 
   const isVoiceMode = interactionMode === 'voice';
   const hasGreetedRef = useRef(false);
 
   useEffect(() => {
     setPage('home');
-    if (isVoiceMode && !hasGreetedRef.current) {
-      hasGreetedRef.current = true;
-      pauseListening(false);
-      
-      const initGreeting = async () => {
-        if (language && language !== 'English') {
-          await useLocalizationStore.getState().fetchDictionary(language);
-        }
-        let welcomeText = useLocalizationStore.getState().t('welcome_home');
-        if (!welcomeText || welcomeText === 'welcome_home') {
-          welcomeText = "Welcome to Parallax! You can tell me what you want to do, like 'Open the scholarship form'.";
-        }
-        setSystemMessage(welcomeText);
+    
+    // Fetch available forms from backend
+    const fetchForms = async () => {
+      try {
+        const data = await fetchAllSchemas();
+        setForms(data);
+        const formTitles = (data || []).map(f => f.title);
+        setAvailableForms(formTitles);
 
-        setTimeout(async () => {
-          try {
-            await playSystemAudio("welcome_home");
-          } catch (e) {
-            console.warn("Autoplay prevented or audio failed:", e);
-          } finally {
-            window.dispatchEvent(new Event('start-voice-turn'));
+        if (isVoiceMode && !hasGreetedRef.current) {
+          hasGreetedRef.current = true;
+          pauseListening(false);
+          
+          if (language && language !== 'English') {
+            await useLocalizationStore.getState().fetchDictionary(language);
           }
-        }, 100);
-      };
+          
+          let welcomeText = `Welcome to Parallax! You can apply for: ${formTitles.join(", ")}. Which one do you want to open?`;
+          setSystemMessage(welcomeText);
+  
+          setTimeout(async () => {
+            try {
+              // Note: If you want this to be completely dynamic, you need TTS instead of pre-recorded audio.
+              // Assuming LLM will take over if the user just asks "What can I do?"
+              await playSystemAudio("welcome_home");
+              window.dispatchEvent(new Event('start-voice-turn'));
+            } catch (e) {
+              if (e.message !== "INTERRUPTED") {
+                console.warn("Autoplay prevented or audio failed:", e);
+                window.dispatchEvent(new Event('start-voice-turn'));
+              }
+            }
+          }, 100);
+        } else if (!isVoiceMode) {
+          setSystemMessage("");
+        }
+      } catch (err) {
+        console.error("Failed to fetch forms:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
 
-      initGreeting();
-    } else if (!isVoiceMode) {
-      setSystemMessage("");
-    }
-  }, [setPage, setSystemMessage, isVoiceMode, language, playSystemAudio]);
+    fetchForms();
+  }, [setPage, setSystemMessage, isVoiceMode, language, playSystemAudio, setAvailableForms]);
 
   return (
-    <main className={`min-h-screen bg-background flex flex-col items-center justify-center p-4 ${isVoiceMode ? 'pb-[260px]' : 'pb-12'}`}>
-      <div className="max-w-[800px] w-full text-center space-y-8 flex flex-col items-center">
+    <main className={`min-h-screen bg-background flex flex-col items-center justify-start pt-6 md:pt-12 p-4 md:p-8 ${isVoiceMode ? 'pb-[380px] md:pb-[420px]' : 'pb-16'}`}>
+      <div className="max-w-[1000px] w-full text-center space-y-6 flex flex-col items-center">
         <img 
           src="/logo.png" 
           alt="Parallax Logo" 
-          className="w-20 h-20 md:w-24 md:h-24 object-contain rounded-2xl shadow-md border border-slate-100 p-2 bg-white"
+          className="w-16 h-16 md:w-24 md:h-24 object-contain rounded-2xl md:rounded-3xl shadow-sm border border-slate-100 p-2 bg-white"
         />
-        <h1 className="font-heading text-5xl md:text-6xl text-primary tracking-tight font-bold">
+        <h1 className="font-heading text-3xl md:text-5xl lg:text-6xl text-primary tracking-tight font-bold">
           Welcome to Parallax
         </h1>
-        <p className="text-xl text-muted-foreground max-w-[600px] mx-auto">
+        <p className="text-lg md:text-xl text-muted-foreground max-w-[700px] mx-auto font-medium">
           An accessibility-first platform designed to help you access digital government services with ease.
         </p>
         
-        <div className="flex flex-col sm:flex-row gap-4 justify-center mt-12">
-          <Button 
-            onClick={() => {
-              if (isVoiceMode) {
-                setSystemMessage("Opening the scholarship form.");
-              }
-              router.push('/form/scholarship_application');
-            }}
-            className="h-[64px] px-8 rounded-xl bg-primary text-primary-foreground text-xl font-bold shadow-md hover:scale-[1.02] active:scale-[0.98] transition-all"
-          >
-            Open Scholarship Form
-          </Button>
-        </div>
+        {loading ? (
+          <div className="mt-8 text-xl animate-pulse text-slate-400 font-bold">Loading available services...</div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5 w-full mt-6">
+            {forms.map((form) => {
+              const { color, icon: Icon } = getFormStyling(form.formId);
+              return (
+                <button
+                  key={form.formId}
+                  onClick={() => {
+                    if (isVoiceMode) {
+                      setSystemMessage(`Opening the ${form.title}.`);
+                    }
+                    router.push(`/form/${form.formId}`);
+                  }}
+                  className={`flex flex-col items-center text-center p-6 md:p-8 rounded-[2rem] border-4 shadow-sm hover:shadow-md transition-all hover:scale-[1.03] active:scale-[0.98] focus:outline-none focus:ring-8 focus:ring-primary/20 ${color}`}
+                  aria-label={`Open ${form.title}`}
+                >
+                  <div className="w-16 h-16 md:w-20 md:h-20 shrink-0 bg-white/60 rounded-2xl flex items-center justify-center mb-4 shadow-xs">
+                    <Icon className="w-9 h-9 md:w-11 md:h-11 opacity-90" />
+                  </div>
+                  <div className="flex-1 flex items-center justify-center">
+                    <h2 className="text-xl md:text-2xl font-bold leading-snug">
+                      {form.title}
+                    </h2>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Voice & Assistant are ONLY rendered on Home Page in No-Touch Mode */}

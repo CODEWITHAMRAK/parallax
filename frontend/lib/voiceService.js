@@ -19,7 +19,7 @@ export class VoiceController {
     this.checkInterval = null;
 
     // Constants
-    this.MIN_DECIBELS = 17; // Calibrated for responsive human voice detection across standard microphones
+    this.MIN_DECIBELS = 15; // Calibrated for responsive human voice detection across standard microphones
     this.INITIAL_SILENCE_DURATION = 12000; // 8s timeout if no speech is detected at all
     this.SPEECH_COMPLETION_DURATION = 500; // 0.5s of silence after speech triggers end
     this.MAX_DURATION = 30000; // 30s hard stop
@@ -280,7 +280,7 @@ export class VoiceController {
       this.stopSpeaking();
       this.pauseListening(false);
       this.speakResolve = resolve;
-      
+
       const audioSource = `/audio/system/${validLang}/${type}.wav`;
       this.audioElement = new Audio(audioSource);
 
@@ -350,15 +350,17 @@ export class VoiceController {
       this.audioElement.onplay = null;
       this.audioElement = null;
     }
-    if (this.speakResolve) {
-      this.speakResolve();
+    if (this.speakReject) {
+      this.speakReject(new Error("INTERRUPTED"));
       this.speakResolve = null;
       this.speakReject = null;
+    } else if (this.speakResolve) {
+      this.speakResolve();
+      this.speakResolve = null;
     }
   }
 
   forceStopSpeaking() {
-    this.isSpeaking = false;
     this.stopSpeaking();
   }
 }
