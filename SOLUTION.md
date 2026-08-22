@@ -30,5 +30,11 @@ Focusing on the domain of Government Services, Parallax features an intelligent,
 6. **Soft Minimalism & High-Contrast Design**
    - For users who prefer or need manual interaction, the UI is built strictly around accessibility guidelines. It uses the Atkinson Hyperlegible Next typeface, heavy tactile buttons, high-contrast coloring (Deep Teal and Charcoal), and a soft minimalist layout to reduce glare and visual clutter.
 
+## Tech Stack
+- **Frontend**: Next.js, React, Tailwind CSS, Zustand (State Management), Lucide React (Icons).
+- **Backend**: Node.js, Express, MongoDB (Mongoose).
+- **AI & ML**: MIMO v2.5 LLM (Dialogue Manager & Vision Extraction), Sarvam API (Multilingual Text-to-Speech Translation), Tesseract OCR (Optical Character Recognition fallback).
+- **Accessibility & Voice**: Web Speech API (Speech Recognition), Sarvam API (Multilingual Text-to-Speech), Custom Audio Pipeline for seamless conversational TTS.
+
 ## Resources
 - **System Prompts**: The core LLM prompts driving the dialogue manager and Vision AI extraction are documented in [SYSTEM_PROMPTS.md](file:///D:/Documents/Web%20Dev/codefury-9/SYSTEM_PROMPTS.md).
