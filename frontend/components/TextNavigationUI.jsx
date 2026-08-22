@@ -9,6 +9,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "./ui/button.jsx";
 import { useVoice, VoiceState } from "../hooks/useVoice.js";
 import { voiceService } from "../lib/voiceService.js";
+import useLocalizationStore from "../store/useLocalizationStore.js";
 
 // Simple inline SVG icons to avoid dependency issues
 const MicIcon = () => (
@@ -52,6 +53,7 @@ export default function TextNavigationUI({ inline = false }) {
         useNavigationStore();
     const { schema, values } = useFormStore();
     const router = useRouter();
+    const t = useLocalizationStore(state => state.t);
 
     const {
         state: voiceState,
@@ -113,7 +115,7 @@ export default function TextNavigationUI({ inline = false }) {
                     console.warn(
                         "[TextNavUI Debug] Transcription failed or returned empty. Prompting user to repeat.",
                     );
-                    useNavigationStore.getState().setSystemMessage("Sorry, I didn't catch that. Could you please repeat?");
+                    useNavigationStore.getState().setSystemMessage(t('didnt_catch'));
                     await playSystemAudio("didnt_catch");
                     const currentMode = document.getElementById('interaction-mode-indicator')?.dataset?.mode;
                     if (currentMode === 'voice') window.dispatchEvent(new Event('start-voice-turn'));
@@ -135,7 +137,7 @@ export default function TextNavigationUI({ inline = false }) {
             pauseListening(); // Manually pause the VAD because it never heard anything
 
             console.log("[TextNavUI Debug] Prompting 'Are you still there?'");
-            useNavigationStore.getState().setSystemMessage("Are you still there? Please say something or tap the mic.");
+            useNavigationStore.getState().setSystemMessage(t('still_there'));
             await playSystemAudio("are_you_there");
             const currentMode = document.getElementById('interaction-mode-indicator')?.dataset?.mode;
             if (currentMode === 'voice') window.dispatchEvent(new Event('start-voice-turn'));
@@ -228,7 +230,7 @@ export default function TextNavigationUI({ inline = false }) {
             useNavigationStore
                 .getState()
                 .setSystemMessage(
-                    "Sorry, I'm having trouble connecting right now.",
+                    t('connection_trouble'),
                 );
             setLoading(false);
         }
@@ -344,7 +346,7 @@ export default function TextNavigationUI({ inline = false }) {
                 <div className="flex items-start gap-4">
                     <div className="w-12 h-12 rounded-full bg-primary flex items-center justify-center shrink-0">
                         <span className="text-primary-foreground font-bold text-xl">
-                            LA
+                            P
                         </span>
                     </div>
                     <div className="flex-1 bg-muted rounded-2xl p-4 md:p-5 rounded-tl-sm text-foreground text-xl font-medium shadow-sm">

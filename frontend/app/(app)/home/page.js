@@ -12,14 +12,14 @@ export default function HomePage() {
 
   useEffect(() => {
     setPage('home');
-    setSystemMessage("Welcome to Lumina Assist! You can tell me what you want to do, like 'Open the scholarship form'.");
+    setSystemMessage("Welcome to Parallax! You can tell me what you want to do, like 'Open the scholarship form'.");
   }, [setPage, setSystemMessage]);
 
   return (
     <main className="min-h-screen bg-background pb-[250px] flex flex-col items-center justify-center p-4">
       <div className="max-w-[800px] w-full text-center space-y-8">
         <h1 className="font-heading text-5xl md:text-6xl text-primary tracking-tight font-bold">
-          Welcome to Lumina Assist
+          Welcome to Parallax
         </h1>
         <p className="text-xl text-muted-foreground max-w-[600px] mx-auto">
           An accessibility-first platform designed to help you access digital government services with ease.

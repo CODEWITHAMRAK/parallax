@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import useNavigationStore from '@/store/useNavigationStore';
+import useLocalizationStore from '@/store/useLocalizationStore';
 import { updateUserLanguage } from '@/lib/apiService';
 import { Button } from '@/components/ui/button';
 
@@ -106,12 +107,16 @@ export default function LanguageSelectionPage() {
     try {
       await updateUserLanguage(languageName);
       setStoreLanguage(languageName);
-      router.push('/');
+      
+      // Fetch localized dictionary for the chosen language
+      await useLocalizationStore.getState().fetchDictionary(languageName);
+
+      router.push('/home');
     } catch (error) {
       console.error("Failed to save language:", error);
-      // Fallback: still navigate if backend fails, for smooth UX
       setStoreLanguage(languageName);
-      router.push('/');
+      useLocalizationStore.getState().fetchDictionary(languageName);
+      router.push('/home');
     }
   };
 
@@ -124,31 +129,32 @@ export default function LanguageSelectionPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#fcf9f8] flex flex-col items-center p-6 md:p-12">
+    <main className="min-h-screen bg-[#fcf9f8] flex flex-col items-center justify-center p-6 md:p-12 pb-24 relative">
+      
       <div className="w-full max-w-[800px] text-center mb-12 mt-8">
-        <h1 className="font-heading text-4xl md:text-5xl text-[#003441] tracking-tight font-bold mb-4">
+        <h1 className="font-heading text-5xl md:text-6xl text-[#003441] tracking-tight font-bold mb-4">
           Choose Your Language
         </h1>
-        <p className="text-xl text-muted-foreground">
+        <p className="text-xl md:text-2xl text-muted-foreground">
           We will use this language to guide you.
         </p>
       </div>
 
-      <div className="w-full max-w-[800px] flex flex-col items-center space-y-12">
+      <div className="w-full max-w-[900px] flex flex-col items-center space-y-16">
         
         {/* Recommended Language */}
         <div className="w-full flex flex-col items-center">
-          <p className="text-sm font-semibold text-[#003441] uppercase tracking-wider mb-6">
+          <p className="text-md font-bold text-[#003441] uppercase tracking-wider mb-6">
             Recommended for you
           </p>
           <Button
             onClick={() => handleLanguageSelect(recommendedLang.name)}
-            className="w-full max-w-[400px] h-[120px] rounded-2xl bg-white border-2 border-transparent hover:border-[#003441] flex flex-col items-center justify-center shadow-md transition-all group"
+            className="w-full max-w-[500px] h-[160px] rounded-3xl bg-white border-4 border-transparent hover:border-[#003441] flex flex-col items-center justify-center shadow-lg transition-all group"
           >
-            <span className="text-4xl text-[#003441] font-bold mb-2 group-hover:scale-105 transition-transform">
+            <span className="text-6xl md:text-7xl text-[#003441] font-bold mb-3 group-hover:scale-105 transition-transform">
               {recommendedLang.native}
             </span>
-            <span className="text-lg text-muted-foreground group-hover:text-[#003441] transition-colors">
+            <span className="text-2xl text-muted-foreground group-hover:text-[#003441] transition-colors">
               {recommendedLang.name}
             </span>
           </Button>
@@ -156,26 +162,44 @@ export default function LanguageSelectionPage() {
 
         {/* Other Languages */}
         <div className="w-full flex flex-col items-center">
-          <p className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-6">
+          <p className="text-md font-bold text-muted-foreground uppercase tracking-wider mb-6">
             Other Languages
           </p>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 w-full">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-6 w-full">
             {otherLangs.map((lang) => (
               <Button
                 key={lang.code}
                 variant="outline"
                 onClick={() => handleLanguageSelect(lang.name)}
-                className="h-[80px] rounded-xl bg-white border-slate-200 hover:border-[#003441] hover:bg-slate-50 flex flex-col items-center justify-center shadow-sm"
+                className="h-[100px] rounded-2xl bg-white border-2 border-slate-200 hover:border-[#003441] hover:bg-slate-50 flex flex-col items-center justify-center shadow-md transition-all group"
               >
-                <span className="text-2xl text-[#003441] font-medium mb-1">
+                <span className="text-3xl text-[#003441] font-bold mb-1 group-hover:scale-110 transition-transform">
                   {lang.native}
                 </span>
-                <span className="text-sm text-muted-foreground">
+                <span className="text-lg text-muted-foreground group-hover:text-[#003441] transition-colors">
                   {lang.name}
                 </span>
               </Button>
             ))}
           </div>
+        </div>
+
+        {/* Big No Touch Mode Button */}
+        <div className="w-full pt-12 mt-12 border-t border-slate-200 flex flex-col items-center">
+          <p className="text-xl md:text-2xl font-medium text-muted-foreground mb-6 text-center">
+            Or, if you prefer to navigate entirely with your voice:
+          </p>
+          <Button 
+            onClick={() => router.push('/home')}
+            className="w-full max-w-[600px] h-[120px] rounded-3xl bg-[#003441] text-white flex flex-col items-center justify-center shadow-xl hover:scale-105 transition-transform group"
+          >
+            <span className="text-4xl md:text-5xl font-bold mb-2">
+              Start No Touch Mode
+            </span>
+            <span className="text-xl opacity-80 font-medium">
+              We will guide you by voice
+            </span>
+          </Button>
         </div>
 
       </div>

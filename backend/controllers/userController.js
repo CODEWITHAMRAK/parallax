@@ -1,7 +1,13 @@
+import User from "../models/User.js";
 import { sendSuccess } from "../utils/response.js";
 
-export const getMe = (req, res) => {
-  return sendSuccess(res, { user: req.user }, "You are authenticated");
+export const getMe = async (req, res) => {
+  try {
+    const user = await User.findById(req.user.userId);
+    return sendSuccess(res, { user }, "You are authenticated");
+  } catch (error) {
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
 };
 
 export const updateLanguage = async (req, res) => {
@@ -12,10 +18,15 @@ export const updateLanguage = async (req, res) => {
     }
     
     // update user
-    req.user.preferredLanguage = language;
-    await req.user.save();
+    const user = await User.findById(req.user.userId);
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+    
+    user.preferredLanguage = language;
+    await user.save();
 
-    return sendSuccess(res, { user: req.user }, "Language updated successfully");
+    return sendSuccess(res, { user }, "Language updated successfully");
   } catch (error) {
     console.error("Error updating language:", error);
     return res.status(500).json({ success: false, message: "Server error" });

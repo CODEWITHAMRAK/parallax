@@ -6,7 +6,7 @@ const useNavigationStore = create((set, get) => ({
   currentStepIndex: 0,
   currentFieldId: null,
   lastAction: null,
-  systemMessage: "Welcome to Lumina Assist. How can I help you today?",
+  systemMessage: "Welcome to Parallax. How can I help you today?",
   stepHistory: {}, // cache for step conversational history [{role, content}]
 
   setLanguage: (lang) => set({ language: lang }),

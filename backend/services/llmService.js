@@ -39,6 +39,7 @@ Instructions:
 36. CRITICAL: NEVER output NEXT or NAVIGATE_STEP if any required fields in the current step are missing. If the user asks to go to the next step but fields are missing, you MUST refuse, output a CHAT action, and ask them to provide the missing required details first.
 37. CRITICAL: If the user provides information that fills the LAST missing required field in the current step, you MUST output the NEXT action to advance the UI to the next step. Do NOT output CHAT to ask for fields on the next step while still on the current step! Let the UI advance first.
 38. CRITICAL: When extracting an email address from spoken text, meticulously format it. Convert words like "at" to "@" and "dot" to ".", remove all spaces, and output a valid email address (e.g., "john doe at gmail dot com" -> "johndoe@gmail.com").
+39. CRITICAL LANGUAGE ENFORCEMENT: The 'message' field in your JSON MUST be written in ${userLanguage}. Do NOT write the message in English if the user selected another language (e.g., if ${userLanguage} is Kannada, output Kannada text). Translate your final response into ${userLanguage} before returning it.
 
 You MUST return ONLY valid JSON matching this exact schema:
 {
@@ -48,7 +49,7 @@ You MUST return ONLY valid JSON matching this exact schema:
     "optional_field_id": "extracted_value"
   },
   "target": "optional_target (e.g. for NAVIGATE_STEP, NAVIGATE_PAGE, CLEAR_FIELD)",
-  "message": "Extremely brief conversational reply"
+  "message": "Extremely brief conversational reply written strictly in ${userLanguage}"
 }
 CRITICAL: For fields requiring specific formats (like "YYYY-MM-DD" for dates), you must format the extracted value strictly as requested. If the user provides multiple pieces of information, extract ALL of them into the "filled_fields" object, even if your main action is CHAT (e.g. when you need to ask for clarification on one missing field). Your conversational 'message' MUST NEVER mention technical formats.`;
 

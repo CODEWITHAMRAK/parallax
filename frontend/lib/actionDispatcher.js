@@ -45,18 +45,18 @@ export const executeAction = (action, router) => {
       if (action.target === 'home') {
         navStore.setPage('home');
         router.push('/');
-        navStore.setSystemMessage(action.message || "Taking you to the home page.");
+        navStore.setSystemMessage(action.message || t('navigating_home'));
       } else if (action.target === 'scholarship_application' || action.target === 'form' || action.target === 'scholarship_form') {
         navStore.setPage('form');
         router.push('/form/scholarship_application');
-        navStore.setSystemMessage(action.message || "Opening the scholarship form.", true);
+        navStore.setSystemMessage(action.message || t('opening_form'), true);
       } else {
-        navStore.setSystemMessage(action.message || `I couldn't find the page: ${action.target}`);
+        navStore.setSystemMessage(action.message || t('page_not_found', { target: action.target }));
       }
       break;
 
     case ACTIONS.NAVIGATE_STEP:
-      if (!schema) return navStore.setSystemMessage("No active form.");
+      if (!schema) return navStore.setSystemMessage(t('no_active_form'));
       const stepIndex = schema.steps.findIndex(s => s.id === action.target);
       if (stepIndex !== -1) {
         // Prevent jumping forward if current step has missing required fields
@@ -70,7 +70,7 @@ export const executeAction = (action, router) => {
             }
           }
           if (missingField) {
-            navStore.setSystemMessage(action.message || `Your ${missingField.label} is still missing. Please provide it before moving on.`);
+            navStore.setSystemMessage(action.message || t('missing_field_warning', { label: missingField.label }));
             break;
           }
         }
@@ -78,7 +78,7 @@ export const executeAction = (action, router) => {
         navStore.setStep(stepIndex);
         if (action.message) navStore.setSystemMessage(action.message);
       } else {
-        navStore.setSystemMessage(action.message || "I couldn't find that step.");
+        navStore.setSystemMessage(action.message || t('step_not_found'));
       }
       break;
 
@@ -93,7 +93,7 @@ export const executeAction = (action, router) => {
         }
       }
       if (missingField) {
-        navStore.setSystemMessage(action.message || `Your ${missingField.label} is still missing. Please provide it before moving next.`);
+        navStore.setSystemMessage(action.message || t('missing_field_next', { label: missingField.label }));
       } else {
         navStore.nextStep(schema.steps.length);
         if (action.message) navStore.setSystemMessage(action.message);
@@ -109,31 +109,31 @@ export const executeAction = (action, router) => {
     case ACTIONS.FILL_FIELD:
     case ACTIONS.SELECT_OPTION:
       // Values are already updated by the universal extractor above
-      navStore.setSystemMessage(action.message || "Got it. I've updated the form.");
+      navStore.setSystemMessage(action.message || t('form_updated'));
       break;
 
     case ACTIONS.CLEAR_FIELD:
       if (!action.target || action.target === 'all') {
         formStore.resetForm();
-        navStore.setSystemMessage(action.message || "I have cleared all your details.");
+        navStore.setSystemMessage(action.message || t('cleared_all'));
       } else {
         formStore.clearValue(action.target);
-        navStore.setSystemMessage(action.message || `Cleared the value for ${action.target}.`);
+        navStore.setSystemMessage(action.message || t('cleared_field', { target: action.target }));
       }
       break;
 
     case ACTIONS.EXPLAIN_FIELD:
-      navStore.setSystemMessage(action.message || "I can explain this field.");
+      navStore.setSystemMessage(action.message || t('explain_field_default'));
       break;
 
     case ACTIONS.SUBMIT:
-      navStore.setSystemMessage(action.message || "Submitting your application...");
+      navStore.setSystemMessage(action.message || t('submitting_application'));
       // Handle submission logic (API call)
       break;
 
     case ACTIONS.RESTART_FORM:
       formStore.resetForm();
-      navStore.resetNavigation(action.message || "The form has been restarted. Let's begin from the first step.");
+      navStore.resetNavigation(action.message || t('form_restarted'));
       break;
 
     default:

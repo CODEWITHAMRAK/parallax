@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { useState, useCallback } from 'react';
 import { voiceService } from '../lib/voiceService';
+import useLocalizationStore from '../store/useLocalizationStore';
 
 export const VoiceState = {
   IDLE: 'idle',
@@ -40,7 +41,8 @@ export function useVoice() {
         } catch (err) {
           console.error("[useVoice Debug] STT Exception:", err);
           setState(VoiceState.ERROR);
-          setErrorMsg("I couldn't understand that. Please try again.");
+          const t = useLocalizationStore.getState().t;
+          setErrorMsg(t('didnt_understand'));
           if (onSpeechEndCallback) onSpeechEndCallback(null);
         }
       };
