@@ -46,7 +46,7 @@ const StopIcon = () => (
     </svg>
 );
 
-export default function TextNavigationUI({ inline = false }) {
+export default function TextNavigationUI({ inline = false, isHomeVoiceOnly = false }) {
     const [input, setInput] = useState("");
     const [loading, setLoading] = useState(false);
     const { systemMessage, currentStepIndex, currentFieldId, currentPage } =
@@ -113,19 +113,21 @@ export default function TextNavigationUI({ inline = false }) {
                     await processInput(transcribed);
                 } else {
                     console.warn(
-                        "[TextNavUI Debug] Transcription failed or returned empty. Prompting user to repeat.",
+                        "[TextNavUI Debug] Transcription failed or returned empty. Prompting user with didnt_catch audio.",
                     );
                     const msg = t('didnt_catch');
                     useNavigationStore.getState().setSystemMessage(msg);
-                    await speak(msg);
+                    await playSystemAudio('didnt_catch');
                     const currentMode = document.getElementById('interaction-mode-indicator')?.dataset?.mode;
-                    if (currentMode === 'voice') window.dispatchEvent(new Event('start-voice-turn'));
+                    if (currentMode === 'voice') {
+                        setTimeout(() => window.dispatchEvent(new Event('start-voice-turn')), 300);
+                    }
                 }
             },
             // onSpeechStart
             () => {
                 console.log(
-                    "[TextNavUI Debug] onSpeechStart callback fired! Clearing 5s no-response timer.",
+                    "[TextNavUI Debug] onSpeechStart callback fired! Clearing silence timer.",
                 );
                 if (noResponseTimerRef.current)
                     clearTimeout(noResponseTimerRef.current);
@@ -133,17 +135,19 @@ export default function TextNavigationUI({ inline = false }) {
         );
 
         noResponseTimerRef.current = setTimeout(async () => {
-            console.log("[TextNavUI Debug] 8s no-response timer fired!");
+            console.log("[TextNavUI Debug] 7s silence timer fired! Triggering are_you_there.");
             isTimeoutRef.current = true;
-            pauseListening(); // Manually pause the VAD because it never heard anything
+            pauseListening(false); // Manually pause VAD without submitting noise
 
             console.log("[TextNavUI Debug] Prompting 'Are you still there?'");
             const msg = t('still_there');
             useNavigationStore.getState().setSystemMessage(msg);
-            await speak(msg);
+            await playSystemAudio('are_you_there');
             const currentMode = document.getElementById('interaction-mode-indicator')?.dataset?.mode;
-            if (currentMode === 'voice') window.dispatchEvent(new Event('start-voice-turn'));
-        }, 12000);
+            if (currentMode === 'voice') {
+                setTimeout(() => window.dispatchEvent(new Event('start-voice-turn')), 300);
+            }
+        }, 7000);
     };
 
     const processInput = async (textToProcess) => {
@@ -299,14 +303,15 @@ export default function TextNavigationUI({ inline = false }) {
     const isProcessing = voiceState === VoiceState.PROCESSING;
     const isSpeaking = voiceState === VoiceState.SPEAKING;
     const disableVoice = isProcessing || loading || isPreparing;
+    const [isMobileCollapsed, setIsMobileCollapsed] = useState(false);
 
     const containerClasses = inline
         ? "w-full h-full flex flex-col justify-center bg-transparent"
-        : "fixed bottom-0 left-0 w-full bg-background border-t border-border shadow-[0_-4px_20px_rgba(0,0,0,0.05)] z-50 p-4 md:p-6";
+        : "fixed bottom-0 left-0 w-full bg-background border-t border-border shadow-[0_-4px_20px_rgba(0,0,0,0.05)] z-50 p-3 md:p-6";
 
     const innerClasses = inline
-        ? "w-full flex flex-col gap-4"
-        : "max-w-[800px] mx-auto flex flex-col gap-4";
+        ? "w-full flex flex-col gap-2 md:gap-4"
+        : "max-w-[800px] mx-auto flex flex-col gap-2 md:gap-4";
 
     return (
         <div className={containerClasses}>
@@ -315,128 +320,184 @@ export default function TextNavigationUI({ inline = false }) {
                 data-mode={interactionMode}
                 className="hidden"
             ></span>
-            <div className={innerClasses}>
-                {/* Top Controls: Mode Switch, Language & Voice Error */}
-                <div className="flex justify-between items-center text-sm mb-2 border-b border-border pb-4">
-                    <button
-                        onClick={toggleInteractionMode}
-                        className={`px-4 py-2 rounded-full font-bold transition-all ${interactionMode === "voice" ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:bg-muted/80"}`}
-                    >
-                        {interactionMode === "voice"
-                            ? "Voice Mode"
-                            : "Text Mode"}
-                    </button>
+
+            {/* Mobile Minimized Floating Pill */}
+            {inline && isMobileCollapsed ? (
+                <div className="lg:hidden flex items-center justify-between gap-3 w-full py-1">
+                    <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                        <div className="w-8 h-8 rounded-full bg-white border border-slate-200 shadow-sm flex items-center justify-center shrink-0 p-1">
+                            <img 
+                                src="/logo.png" 
+                                alt="Parallax" 
+                                className="w-full h-full object-contain"
+                            />
+                        </div>
+                        <p className="text-xs text-slate-700 font-medium truncate">
+                            {isListening ? "Listening..." : isSpeaking ? "Speaking..." : systemMessage || "Assistant ready"}
+                        </p>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                        <button
+                            onClick={handleVoiceAction}
+                            disabled={disableVoice}
+                            className={`w-11 h-11 rounded-full flex items-center justify-center text-white shadow-md transition-all ${
+                                isListening ? "bg-primary animate-pulse scale-105" : "bg-[#003441]"
+                            }`}
+                            aria-label="Toggle Voice"
+                        >
+                            {isListening || isSpeaking ? <StopIcon /> : <MicIcon />}
+                        </button>
+
+                        <button
+                            onClick={() => setIsMobileCollapsed(false)}
+                            className="px-2.5 py-1.5 rounded-lg bg-slate-100 text-slate-700 text-xs font-bold hover:bg-slate-200 transition-colors"
+                        >
+                            Expand ▲
+                        </button>
+                    </div>
                 </div>
+            ) : (
+                <div className={innerClasses}>
+                    {/* Top Controls: Mode Switch, Language & Voice Error */}
+                    {!isHomeVoiceOnly && (
+                        <div className="flex justify-between items-center text-sm mb-1 md:mb-2 border-b border-border pb-2 md:pb-4">
+                            <div className="inline-flex items-center p-0.5 bg-slate-100 rounded-full border border-slate-200 shadow-inner">
+                                <button
+                                    onClick={() => interactionMode !== 'voice' && toggleInteractionMode()}
+                                    className={`px-2.5 sm:px-3 py-1 text-xs font-bold rounded-full transition-all ${interactionMode === "voice" ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+                                >
+                                    Voice Mode
+                                </button>
+                                <button
+                                    onClick={() => interactionMode !== 'text' && toggleInteractionMode()}
+                                    className={`px-2.5 sm:px-3 py-1 text-xs font-bold rounded-full transition-all ${interactionMode === "text" ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+                                >
+                                    Text Mode
+                                </button>
+                            </div>
 
-                {voiceError && (
-                    <div className="text-error font-medium text-center">
-                        {voiceError}
+                            {inline && (
+                                <button
+                                    onClick={() => setIsMobileCollapsed(true)}
+                                    className="lg:hidden text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 px-2.5 py-1 rounded-md transition-colors"
+                                >
+                                    Minimize ▼
+                                </button>
+                            )}
+                        </div>
+                    )}
+
+                    {voiceError && (
+                        <div className="text-error font-medium text-center text-xs md:text-sm">
+                            {voiceError}
+                        </div>
+                    )}
+
+                    {!voiceError && interactionMode === "voice" && (
+                        <div className="text-center mb-2 md:mb-4">
+                            <span className="text-muted-foreground font-medium text-xs md:text-base">
+                                {isPreparing
+                                    ? "Warming up mic..."
+                                    : isListening
+                                      ? "Listening... (Speak now)"
+                                      : isProcessing
+                                        ? "Processing..."
+                                        : isSpeaking
+                                          ? "Assistant Speaking..."
+                                          : "Voice Paused. Tap mic to resume."}
+                            </span>
+                        </div>
+                    )}
+
+                    {/* System Message */}
+                    <div className="flex items-start gap-2.5 md:gap-4">
+                        <div className="w-8 h-8 md:w-12 md:h-12 rounded-full bg-white border border-slate-200 shadow-sm flex items-center justify-center shrink-0 p-1 md:p-1.5 overflow-hidden">
+                            <img 
+                                src="/logo.png" 
+                                alt="Parallax Assistant" 
+                                className="w-full h-full object-contain"
+                            />
+                        </div>
+                        <div className="flex-1 bg-muted rounded-xl md:rounded-2xl p-3 md:p-5 rounded-tl-sm text-foreground text-sm md:text-lg font-medium shadow-sm max-h-[140px] md:max-h-none overflow-y-auto">
+                            {loading || isProcessing ? (
+                                <span className="animate-pulse">Processing...</span>
+                            ) : systemMessage ? (
+                                systemMessage
+                            ) : (
+                                <span className="animate-pulse">Loading...</span>
+                            )}
+                        </div>
                     </div>
-                )}
 
-                {!voiceError && interactionMode === "voice" && (
-                    <div className="text-center mb-6">
-                        <span className="text-muted-foreground font-medium text-lg">
-                            {isPreparing
-                                ? "Warming up mic..."
-                                : isListening
-                                  ? "Listening... (Speak now)"
-                                  : isProcessing
-                                    ? "Processing..."
+                    {/* Voice & Text Input */}
+                    <div
+                        className={`flex flex-col md:flex-row gap-2 md:gap-4 items-center justify-center ${interactionMode === "voice" ? "mt-2 md:mt-6" : "mt-1 md:mt-2"}`}
+                    >
+                        {/* Prominent Voice Button */}
+                        <button
+                            onClick={handleVoiceAction}
+                            disabled={disableVoice}
+                            className={`rounded-full flex items-center justify-center transition-all shadow-md shrink-0 
+                  ${interactionMode === "voice" ? "w-16 h-16 sm:w-20 sm:h-20 md:w-28 md:h-28" : "w-14 h-14 md:w-20 md:h-20"}
+                  ${
+                      isPreparing
+                          ? "bg-muted text-muted-foreground cursor-wait"
+                          : isListening
+                            ? "bg-primary text-primary-foreground animate-pulse scale-105 shadow-lg shadow-primary/20"
+                            : isSpeaking
+                              ? "bg-secondary text-secondary-foreground shadow-lg shadow-secondary/20"
+                              : "bg-primary text-primary-foreground hover:scale-105"
+                  } 
+                  ${disableVoice ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
+                            aria-label={
+                                isListening
+                                    ? "Stop Listening"
                                     : isSpeaking
-                                      ? "Assistant Speaking..."
-                                      : "Voice Paused. Tap mic to resume."}
-                        </span>
-                    </div>
-                )}
+                                      ? "Stop Speaking"
+                                      : "Start Voice Input"
+                            }
+                        >
+                            {isListening || isSpeaking ? <StopIcon /> : <MicIcon />}
+                        </button>
 
-                {/* System Message */}
-                <div className="flex items-start gap-4">
-                    <div className="w-12 h-12 rounded-full bg-white border border-slate-200 shadow-sm flex items-center justify-center shrink-0 p-1.5 overflow-hidden">
-                        <img 
-                            src="/logo.png" 
-                            alt="Parallax Assistant" 
-                            className="w-full h-full object-contain"
-                        />
-                    </div>
-                    <div className="flex-1 bg-muted rounded-2xl p-4 md:p-5 rounded-tl-sm text-foreground text-xl font-medium shadow-sm">
-                        {loading || isProcessing ? (
-                            <span className="animate-pulse">Processing...</span>
-                        ) : systemMessage ? (
-                            systemMessage
-                        ) : (
-                            <span className="animate-pulse">Loading...</span>
+                        {/* Text Input (Secondary) - Hidden in Voice Mode & Home Voice Only */}
+                        {!isHomeVoiceOnly && interactionMode === "text" && (
+                            <form
+                                onSubmit={handleSubmit}
+                                className="flex gap-2 w-full md:flex-1 relative"
+                            >
+                                <input
+                                    type="text"
+                                    value={input}
+                                    onChange={(e) => setInput(e.target.value)}
+                                    placeholder="Type your response here..."
+                                    disabled={loading || isListening}
+                                    className="w-full bg-muted border-none rounded-xl px-3 py-2.5 md:px-4 md:py-4 pr-16 outline-none focus:ring-2 focus:ring-primary text-sm md:text-lg"
+                                />
+                                <button
+                                    type="submit"
+                                    disabled={
+                                        loading || !input.trim() || isListening
+                                    }
+                                    className="absolute right-1.5 top-1.5 bottom-1.5 bg-primary text-primary-foreground px-3 md:px-4 rounded-lg font-bold text-xs md:text-sm disabled:opacity-50 transition-colors hover:bg-primary/90"
+                                >
+                                    Send
+                                </button>
+                            </form>
+                        )}
+
+                        {!isHomeVoiceOnly && interactionMode === "voice" && (
+                            <button
+                                onClick={toggleInteractionMode}
+                                className="mt-1 md:mt-4 px-4 py-1.5 md:px-6 md:py-3 rounded-full bg-error/10 text-error font-bold text-xs md:text-sm hover:bg-error/20 transition-colors"
+                            >
+                                End Call
+                            </button>
                         )}
                     </div>
                 </div>
-
-                {/* Voice & Text Input */}
-                <div
-                    className={`flex flex-col md:flex-row gap-4 items-center ${interactionMode === "voice" ? "mt-8" : "mt-2"}`}
-                >
-                    {/* Prominent Voice Button */}
-                    <button
-                        onClick={handleVoiceAction}
-                        disabled={disableVoice}
-                        className={`rounded-full flex items-center justify-center transition-all shadow-md shrink-0 
-              ${interactionMode === "voice" ? "w-24 h-24 md:w-32 md:h-32" : "w-20 h-20 md:w-24 md:h-24"}
-              ${
-                  isPreparing
-                      ? "bg-muted text-muted-foreground cursor-wait"
-                      : isListening
-                        ? "bg-primary text-primary-foreground animate-pulse scale-110 shadow-lg shadow-primary/20"
-                        : isSpeaking
-                          ? "bg-secondary text-secondary-foreground shadow-lg shadow-secondary/20"
-                          : "bg-primary text-primary-foreground hover:scale-105"
-              } 
-              ${disableVoice ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
-                        aria-label={
-                            isListening
-                                ? "Stop Listening"
-                                : isSpeaking
-                                  ? "Stop Speaking"
-                                  : "Start Voice Input"
-                        }
-                    >
-                        {isListening || isSpeaking ? <StopIcon /> : <MicIcon />}
-                    </button>
-
-                    {/* Text Input (Secondary) - Hidden in Voice Mode */}
-                    {interactionMode === "text" && (
-                        <form
-                            onSubmit={handleSubmit}
-                            className="flex gap-2 w-full md:flex-1 relative"
-                        >
-                            <input
-                                type="text"
-                                value={input}
-                                onChange={(e) => setInput(e.target.value)}
-                                placeholder="Type your response here..."
-                                disabled={loading || isListening}
-                                className="w-full bg-muted border-none rounded-xl px-4 py-4 pr-16 outline-none focus:ring-2 focus:ring-primary text-lg"
-                            />
-                            <button
-                                type="submit"
-                                disabled={
-                                    loading || !input.trim() || isListening
-                                }
-                                className="absolute right-2 top-2 bottom-2 bg-primary text-primary-foreground px-4 rounded-lg font-bold disabled:opacity-50 transition-colors hover:bg-primary/90"
-                            >
-                                Send
-                            </button>
-                        </form>
-                    )}
-
-                    {interactionMode === "voice" && (
-                        <button
-                            onClick={toggleInteractionMode}
-                            className="mt-4 px-6 py-3 rounded-full bg-error/10 text-error font-bold hover:bg-error/20 transition-colors"
-                        >
-                            End Call
-                        </button>
-                    )}
-                </div>
-            </div>
+            )}
         </div>
     );
 }

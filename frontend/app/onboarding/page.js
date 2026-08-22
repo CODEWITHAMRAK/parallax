@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import useNavigationStore from '@/store/useNavigationStore';
@@ -57,10 +57,13 @@ export default function LanguageSelectionPage() {
   const [otherLangs, setOtherLangs] = useState(LANGUAGES.slice(1));
   const [loading, setLoading] = useState(true);
   const [voiceStatusMsg, setVoiceStatusMsg] = useState('');
+  const silenceTimerRef = useRef(null);
+  const isTimeoutRef = useRef(false);
 
   // Stop any voice activity on unmount
   useEffect(() => {
     return () => {
+      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
       pauseListening();
       stopSpeaking();
     };
@@ -73,8 +76,6 @@ export default function LanguageSelectionPage() {
     }
 
     if (status === "authenticated") {
-      // Regardless of whether they have a preferred language or not, 
-      // the new flow says: "first show them the normal or no touch mode when user logs in"
       fetchLocationAndSetLanguage();
       setLoading(false);
     }
@@ -112,20 +113,32 @@ export default function LanguageSelectionPage() {
   };
 
   const handleLanguageSelect = async (languageName) => {
+    if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+    try {
+      const currentStorage = JSON.parse(localStorage.getItem('navigation-storage') || '{}');
+      localStorage.setItem('navigation-storage', JSON.stringify({
+        ...currentStorage,
+        state: { ...(currentStorage.state || {}), language: languageName }
+      }));
+    } catch (err) {}
+
     try {
       await updateUserLanguage(languageName);
       setStoreLanguage(languageName);
       await useLocalizationStore.getState().fetchDictionary(languageName);
-      router.push('/home');
+      window.location.href = '/home';
     } catch (error) {
       console.error("Failed to save language:", error);
       setStoreLanguage(languageName);
       useLocalizationStore.getState().fetchDictionary(languageName);
-      router.push('/home');
+      window.location.href = '/home';
     }
   };
 
   const startVoiceLanguageSelection = async () => {
+    if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+    isTimeoutRef.current = false;
+
     setVoiceStatusMsg("Speaking...");
     try {
       await playSystemAudio('ask_language'); // Plays our pre-saved English, Kannada, Hindi audio
@@ -134,9 +147,26 @@ export default function LanguageSelectionPage() {
       await speak("Please choose your language. Which language do you speak? ನೀವು ಯಾವ ಭಾಷೆಯನ್ನು ಮಾತನಾಡುತ್ತೀರಿ? आप कौन सी भाषा बोलते हैं?");
     }
 
-    setVoiceStatusMsg("Listening...");
+    setVoiceStatusMsg("Listening... (Tell me your language)");
+
+    // 7s silence safety timer
+    silenceTimerRef.current = setTimeout(async () => {
+      isTimeoutRef.current = true;
+      pauseListening(false);
+      setVoiceStatusMsg("Are you still there?");
+      try {
+        await playSystemAudio('are_you_there');
+      } catch (e) {
+        await speak("Are you still there? Please tell me which language you speak.");
+      }
+      setTimeout(() => startVoiceLanguageSelection(), 400);
+    }, 7000);
+
     startListening(
       async (transcribed) => {
+        if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+        if (isTimeoutRef.current) return;
+
         if (transcribed) {
           setVoiceStatusMsg("Processing...");
           const lower = transcribed.toLowerCase();
@@ -153,14 +183,26 @@ export default function LanguageSelectionPage() {
             await speak(`Setting language to ${matchedLang}`);
             handleLanguageSelect(matchedLang);
           } else {
-            await speak("Sorry, I didn't catch that. Please tell me your language again.");
-            startVoiceLanguageSelection();
+            setVoiceStatusMsg("I didn't catch that. Please repeat.");
+            try {
+              await playSystemAudio('didnt_catch');
+            } catch (e) {
+              await speak("Sorry, I didn't catch that. Please tell me your language again.");
+            }
+            setTimeout(() => startVoiceLanguageSelection(), 400);
           }
         } else {
-          startVoiceLanguageSelection(); // Try again
+          setVoiceStatusMsg("I didn't catch that. Please repeat.");
+          try {
+            await playSystemAudio('didnt_catch');
+          } catch (e) {
+            await speak("Sorry, I didn't catch that. Please tell me your language again.");
+          }
+          setTimeout(() => startVoiceLanguageSelection(), 400);
         }
       },
       () => {
+        if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
         setVoiceStatusMsg("Recording...");
       }
     );

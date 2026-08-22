@@ -2,6 +2,7 @@ import { create } from 'zustand';
 
 // Fallback basic English dictionary
 const fallbackDictionary = {
+  welcome_home: "Welcome to Parallax! You can tell me what you want to do, like 'Open the scholarship form'.",
   missing_field: "Your {{field}} is still missing. Please provide it before moving on.",
   missing_field_next: "Your {{field}} is still missing. Please provide it before moving next.",
   no_active_form: "No active form.",

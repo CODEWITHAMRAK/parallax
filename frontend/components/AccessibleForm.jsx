@@ -113,8 +113,12 @@ export default function AccessibleForm({ formId }) {
                         form_values: useFormStore.getState().values,
                         available_steps: schema.steps.map((s) => s.id),
                     };
+                    const promptMsg = currentStepIndex === 0
+                        ? "I just started the application. Please introduce the scholarship form and let me know I can tell you my details or scan/upload documents to autofill."
+                        : `I just entered the ${currentStep.title} step. Please briefly announce this step and remind me I can tell you my details or scan/upload documents.`;
+
                     const action = await fetchChatAction(
-                        "I just entered this step. Please greet me, inform me that I can either tell you the details or upload/scan a relevant document to autofill this step automatically, and ask for the first field.",
+                        promptMsg,
                         context,
                     );
                     if (action.message) {

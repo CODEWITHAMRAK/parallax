@@ -19,9 +19,9 @@ export class VoiceController {
     this.checkInterval = null;
 
     // Constants
-    this.MIN_DECIBELS = 15; // Increased threshold to avoid triggering on background noise
+    this.MIN_DECIBELS = 28; // Elevated threshold (28/255) to firmly filter out background hiss, fans, and ambient noise
     this.INITIAL_SILENCE_DURATION = 8000; // 8s timeout if no speech is detected at all
-    this.SPEECH_COMPLETION_DURATION = 2500; // 2.5s of silence after speech triggers end
+    this.SPEECH_COMPLETION_DURATION = 1500; // 2.0s of silence after speech triggers end
     this.MAX_DURATION = 30000; // 30s hard stop
     this.maxTimer = null;
     this.initialSilenceTimer = null;
@@ -39,7 +39,7 @@ export class VoiceController {
     
     try {
       this.stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: false }
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
       });
 
       this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
@@ -259,6 +259,7 @@ export class VoiceController {
         let fallbackText = "Sorry, I didn't catch that. Could you please repeat?";
         if (type === "are_you_there" || type === "still_there") fallbackText = "Are you still there? Please say something or tap the mic.";
         if (type === "network_error" || type === "connection_trouble") fallbackText = "Sorry, I'm having trouble connecting right now.";
+        if (type === "welcome_home") fallbackText = "Welcome to Parallax! You can tell me what you want to do, like 'Open the scholarship form'.";
         
         try {
           const t = useLocalizationStore?.getState()?.t;
@@ -266,6 +267,7 @@ export class VoiceController {
             if (type === "didnt_catch" || type === "didnt_understand") fallbackText = t('didnt_catch');
             else if (type === "are_you_there" || type === "still_there") fallbackText = t('still_there');
             else if (type === "network_error" || type === "connection_trouble") fallbackText = t('connection_trouble');
+            else if (type === "welcome_home") fallbackText = t('welcome_home') || fallbackText;
           }
         } catch (err) {
           console.warn("Could not retrieve localized string from store:", err);
