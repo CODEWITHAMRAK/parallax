@@ -6,7 +6,7 @@ import useNavigationStore from '@/store/useNavigationStore.js';
 import useLocalizationStore from '@/store/useLocalizationStore.js';
 import { useVoiceStore, useVoice } from '@/hooks/useVoice.js';
 import { useRouter } from 'next/navigation';
-import { GraduationCap, Landmark, Bus, FileText } from 'lucide-react';
+import { GraduationCap, Landmark, Bus, FileText, Volume2 } from 'lucide-react';
 import { fetchAllSchemas } from '@/lib/apiService.js';
 
 // Color and icon mapping for specific forms to aid cognitive inclusivity
@@ -31,6 +31,7 @@ export default function HomePage() {
   const router = useRouter();
 
   const [forms, setForms] = useState([]);
+  const [infos, setInfos] = useState([]);
   const [loading, setLoading] = useState(true);
 
   const isVoiceMode = interactionMode === 'voice';
@@ -40,12 +41,18 @@ export default function HomePage() {
     setPage('home');
     
     // Fetch available forms from backend
-    const fetchForms = async () => {
+    const fetchData = async () => {
       try {
         const data = await fetchAllSchemas();
         setForms(data);
         const formTitles = (data || []).map(f => f.title);
         setAvailableForms(formTitles);
+
+        const infoRes = await fetch("http://localhost:8080/api/information");
+        if (infoRes.ok) {
+            const infoData = await infoRes.json();
+            setInfos(infoData);
+        }
 
         if (isVoiceMode && !hasGreetedRef.current) {
           hasGreetedRef.current = true;
@@ -75,13 +82,13 @@ export default function HomePage() {
           setSystemMessage("");
         }
       } catch (err) {
-        console.error("Failed to fetch forms:", err);
+        console.error("Failed to fetch data:", err);
       } finally {
         setLoading(false);
       }
     };
 
-    fetchForms();
+    fetchData();
   }, [setPage, setSystemMessage, isVoiceMode, language, playSystemAudio, setAvailableForms]);
 
   return (
@@ -102,33 +109,74 @@ export default function HomePage() {
         {loading ? (
           <div className="mt-8 text-xl animate-pulse text-slate-400 font-bold">Loading available services...</div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-5 w-full mt-6">
-            {forms.map((form) => {
-              const { color, icon: Icon } = getFormStyling(form.formId);
-              return (
-                <button
-                  key={form.formId}
-                  onClick={() => {
-                    if (isVoiceMode) {
-                      setSystemMessage(`Opening the ${form.title}.`);
-                    }
-                    router.push(`/form/${form.formId}`);
-                  }}
-                  className={`flex flex-col items-center text-center p-6 md:p-8 rounded-[2rem] border-4 shadow-sm hover:shadow-md transition-all hover:scale-[1.03] active:scale-[0.98] focus:outline-none focus:ring-8 focus:ring-primary/20 ${color}`}
-                  aria-label={`Open ${form.title}`}
-                >
-                  <div className="w-16 h-16 md:w-20 md:h-20 shrink-0 bg-white/60 rounded-2xl flex items-center justify-center mb-4 shadow-xs">
-                    <Icon className="w-9 h-9 md:w-11 md:h-11 opacity-90" />
+          <>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-5 w-full mt-6">
+              {forms.map((form) => {
+                const { color, icon: Icon } = getFormStyling(form.formId);
+                return (
+                  <button
+                    key={form.formId}
+                    onClick={() => {
+                      if (isVoiceMode) {
+                        setSystemMessage(`Opening the ${form.title}.`);
+                      }
+                      router.push(`/form/${form.formId}`);
+                    }}
+                    className={`flex flex-col items-center text-center p-6 md:p-8 rounded-[2rem] border-4 shadow-sm hover:shadow-md transition-all hover:scale-[1.03] active:scale-[0.98] focus:outline-none focus:ring-8 focus:ring-primary/20 ${color}`}
+                    aria-label={`Open ${form.title}`}
+                  >
+                    <div className="w-16 h-16 md:w-20 md:h-20 shrink-0 bg-white/60 rounded-2xl flex items-center justify-center mb-4 shadow-xs">
+                      <Icon className="w-9 h-9 md:w-11 md:h-11 opacity-90" />
+                    </div>
+                    <div className="flex-1 flex items-center justify-center">
+                      <h2 className="text-xl md:text-2xl font-bold leading-snug">
+                        {form.title}
+                      </h2>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            {infos.length > 0 && (
+              <div className="w-full mt-12 text-left">
+                <h2 className="text-2xl md:text-3xl font-bold text-slate-800 mb-6 flex items-center gap-3">
+                  <div className="w-10 h-10 bg-[#003441] rounded-full flex items-center justify-center">
+                    <FileText className="w-5 h-5 text-white" />
                   </div>
-                  <div className="flex-1 flex items-center justify-center">
-                    <h2 className="text-xl md:text-2xl font-bold leading-snug">
-                      {form.title}
-                    </h2>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
+                  Information Board
+                </h2>
+                <div className="flex flex-col gap-4">
+                  {infos.map((info, idx) => {
+                    const title = info.title[language || "English"] || info.title["English"];
+                    const content = info.content[language || "English"] || info.content["English"];
+                    const audioUrl = info.audioUrls?.[language || "English"];
+
+                    return (
+                      <div key={idx} className="bg-white p-6 md:p-8 rounded-[1.5rem] border-4 border-slate-200 shadow-sm flex flex-col md:flex-row gap-6 justify-between items-start md:items-center">
+                        <div className="flex-1">
+                          <h3 className="text-xl md:text-2xl font-bold text-primary mb-2">{title}</h3>
+                          <p className="text-lg text-slate-600 font-medium leading-relaxed">{content}</p>
+                        </div>
+                        {audioUrl && (
+                          <button 
+                            onClick={() => {
+                              const audio = new Audio(`http://localhost:8080${audioUrl}`);
+                              audio.play();
+                            }}
+                            className="shrink-0 bg-primary/10 hover:bg-primary/20 text-primary px-6 py-4 rounded-2xl font-bold text-lg flex items-center gap-2 transition-colors focus:ring-4 focus:ring-primary/30 outline-none"
+                            aria-label={`Listen to ${title}`}
+                          >
+                            Listen <Volume2 className="w-6 h-6" />
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </>
         )}
       </div>
 

@@ -8,6 +8,8 @@ import userRoutes from "./routes/userRoutes.js";
 import chatRoutes from "./routes/chatRoutes.js";
 import schemaRoutes from "./routes/schemaRoutes.js";
 import draftRoutes from "./routes/draftRoutes.js";
+import submissionRoutes from "./routes/submissionRoutes.js";
+import informationRoutes from "./routes/informationRoutes.js";
 import voiceRoutes from "./routes/voiceRoutes.js";
 import localizationRoutes from "./routes/localizationRoutes.js";
 import uploadRoutes from "./routes/uploadRoutes.js";
@@ -25,6 +27,13 @@ app.use(cors({
 }));
 app.use(cookieParser());
 
+import path from "path";
+import { fileURLToPath } from "url";
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+app.use("/static", express.static(path.join(__dirname, "public")));
+
 mongoose
   .connect(process.env.MONGO_URI || "mongodb://localhost:27017/codefury")
   .then(() => console.log("MongoDB connected"))
@@ -35,6 +44,8 @@ app.use("/api/user", userRoutes);
 app.use("/api/chat", chatRoutes);
 app.use("/api/schemas", schemaRoutes);
 app.use("/api/drafts", draftRoutes);
+app.use("/api/submissions", submissionRoutes);
+app.use("/api/information", informationRoutes);
 app.use("/api/voice", voiceRoutes);
 app.use("/api/localization", localizationRoutes);
 app.use("/api/upload", uploadRoutes);

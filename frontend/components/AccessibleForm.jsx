@@ -22,6 +22,9 @@ import {
     XCircle,
     Loader2,
     Sparkles,
+    Eye,
+    X,
+    ExternalLink
 } from "lucide-react";
 import { apiFetch } from "../lib/api.js";
 
@@ -34,6 +37,7 @@ export default function AccessibleForm({ formId }) {
         loadingSchema,
         error,
         draftLoaded,
+        isSubmitted,
     } = useFormStore();
     const { currentStepIndex, currentFieldId, stepHistory, setSystemMessage } =
         useNavigationStore();
@@ -44,25 +48,45 @@ export default function AccessibleForm({ formId }) {
     const [isProcessing, setIsProcessing] = useState(false);
     const fileInputRef = useRef(null);
     const [activeFileTarget, setActiveFileTarget] = useState(null);
+    const [viewImageTarget, setViewImageTarget] = useState(null);
 
     useEffect(() => {
         const initForm = async () => {
             if (!formId) return;
             await loadSchema(formId);
             try {
-                const draftData = await getDraft(formId);
-                if (draftData && draftData.draft) {
-                    useFormStore.setState((state) => ({
-                        values: { ...state.values, ...draftData.draft.values },
-                    }));
-                    if (draftData.draft.currentStepIndex !== undefined) {
-                        useNavigationStore
-                            .getState()
-                            .setStep(draftData.draft.currentStepIndex);
+                const submissionRes = await apiFetch(`/api/submissions/${formId}`);
+                let loadedSubmission = false;
+                if (submissionRes.ok) {
+                    const existingSub = await submissionRes.json();
+                    if (existingSub) {
+                        useFormStore.setState((state) => ({
+                            isSubmitted: true,
+                            values: { ...state.values, ...existingSub.values },
+                        }));
+                        const currentSchema = useFormStore.getState().schema;
+                        if (currentSchema) {
+                            useNavigationStore.getState().setStep(currentSchema.steps.length);
+                        }
+                        loadedSubmission = true;
+                    }
+                }
+                
+                if (!loadedSubmission) {
+                    const draftData = await getDraft(formId);
+                    if (draftData && draftData.draft) {
+                        useFormStore.setState((state) => ({
+                            values: { ...state.values, ...draftData.draft.values },
+                        }));
+                        if (draftData.draft.currentStepIndex !== undefined) {
+                            useNavigationStore
+                                .getState()
+                                .setStep(draftData.draft.currentStepIndex);
+                        }
                     }
                 }
             } catch (e) {
-                console.error("Failed to load draft", e);
+                console.error("Failed to load draft or submission", e);
             } finally {
                 useFormStore.setState({ draftLoaded: true });
             }
@@ -95,7 +119,7 @@ export default function AccessibleForm({ formId }) {
 
         if (
             schema &&
-            schema.steps[currentStepIndex] &&
+            (schema.steps[currentStepIndex] || currentStepIndex === schema.steps.length) &&
             !hasAssistantGreeting &&
             draftLoaded &&
             !fetchingRef.current
@@ -113,7 +137,8 @@ export default function AccessibleForm({ formId }) {
 
             const fetchGreeting = async () => {
                 try {
-                    const currentStep = schema.steps[currentStepIndex];
+                    const isReviewStep = currentStepIndex === schema.steps.length;
+                    const currentStep = isReviewStep ? { title: "Review", id: "review_step", fields: [] } : schema.steps[currentStepIndex];
                     const context = {
                         current_page: "form",
                         form_title: schema.title,
@@ -127,10 +152,16 @@ export default function AccessibleForm({ formId }) {
                     };
                     const docType = currentStep.autofill_document_type ? ` You can ask them to upload their ${currentStep.autofill_document_type} to autofill this step.` : "";
                     
-                    const promptMsg =
-                        currentStepIndex === 0
-                            ? `I just started the application. Please introduce the form and let me know I can tell you my details or scan/upload documents to autofill.${docType}`
-                            : `I just entered the ${currentStep.title} step. Please briefly announce this step and remind me I can tell you my details or scan/upload documents.${docType}`;
+                    let promptMsg = "";
+                    if (useFormStore.getState().isSubmitted) {
+                        promptMsg = `I just opened this application but I have already submitted it previously. Let me know that my form is already submitted, and ask if I would like to view my submitted details or delete my previous submission to restart.`;
+                    } else if (isReviewStep) {
+                        promptMsg = `I just entered the Review step. Please read out my details and ask me to confirm if everything is correct before I submit.`;
+                    } else if (currentStepIndex === 0) {
+                        promptMsg = `I just started the application. Please introduce the form and let me know I can tell you my details or scan/upload documents to autofill.${docType}`;
+                    } else {
+                        promptMsg = `I just entered the ${currentStep.title} step. Please briefly announce this step and remind me I can tell you my details or scan/upload documents.${docType}`;
+                    }
 
                     const action = await fetchChatAction(promptMsg, context);
                     if (action.message) {
@@ -203,8 +234,49 @@ export default function AccessibleForm({ formId }) {
             }
         };
 
+        const handleSubmit = async () => {
+            try {
+                const res = await apiFetch(`/api/submissions/${formId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ values: useFormStore.getState().values })
+                });
+                
+                if (res.ok) {
+                    setSystemMessage("Form successfully submitted.", true);
+                    useFormStore.getState().resetForm();
+                    useNavigationStore.getState().resetNavigation();
+                    
+                    const currentMode = document.getElementById("interaction-mode-indicator")?.dataset?.mode;
+                    if (currentMode === "voice") {
+                        speak("Form successfully submitted.").then(() => {
+                            router.push('/home');
+                        });
+                    } else {
+                        router.push('/home');
+                    }
+                } else {
+                    const data = await res.json();
+                    setSystemMessage(`Failed to submit form: ${data.error}`, true);
+                }
+            } catch (err) {
+                console.error("Submission error", err);
+                setSystemMessage("Failed to submit form due to a network error.", true);
+            }
+        };
+
+        const handleRestart = async () => {
+            try {
+                await apiFetch(`/api/submissions/${formId}`, { method: 'DELETE' });
+            } catch (e) {
+                console.error("Failed to delete form", e);
+            }
+        };
+
         window.addEventListener("trigger-scanner", handleTriggerScanner);
         window.addEventListener("trigger-file-picker", handleTriggerFilePicker);
+        window.addEventListener("trigger-submit", handleSubmit);
+        window.addEventListener("trigger-restart", handleRestart);
 
         return () => {
             window.removeEventListener("trigger-scanner", handleTriggerScanner);
@@ -212,8 +284,10 @@ export default function AccessibleForm({ formId }) {
                 "trigger-file-picker",
                 handleTriggerFilePicker,
             );
+            window.removeEventListener("trigger-submit", handleSubmit);
+            window.removeEventListener("trigger-restart", handleRestart);
         };
-    }, [schema, currentStepIndex]);
+    }, [schema, currentStepIndex, formId, setSystemMessage, router, speak]);
 
     const processFileToDataUrl = async (file) => {
         if (
@@ -423,10 +497,82 @@ export default function AccessibleForm({ formId }) {
 
     if (!schema) return null;
 
-    const currentStep = schema.steps[currentStepIndex];
+    if (isSubmitted) {
+        return (
+            <div className="w-full flex flex-col items-center justify-center min-h-[500px] text-center p-8 space-y-6">
+                <div className="w-24 h-24 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-4 border-4 border-emerald-50">
+                    <CheckCircle className="w-12 h-12 text-emerald-600" />
+                </div>
+                <h2 className="text-4xl font-bold text-slate-800">Application Submitted</h2>
+                <p className="text-xl text-slate-600 max-w-lg mx-auto">
+                    You have already successfully submitted this application. Your details have been recorded.
+                </p>
+                
+                <div className="w-full max-w-3xl mt-8 mb-8 text-left bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+                    <div className="bg-slate-50 border-b border-slate-200 px-6 py-4">
+                        <h3 className="text-xl font-bold text-slate-800">Submitted Details</h3>
+                    </div>
+                    <div className="p-6 divide-y divide-slate-100">
+                        {schema.steps.map((step) => (
+                            <div key={step.id} className="py-4 first:pt-0 last:pb-0">
+                                <h4 className="text-lg font-bold text-primary mb-4">{step.title}</h4>
+                                <dl className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
+                                    {step.fields.map((field) => (
+                                        <div key={field.id} className="flex flex-col">
+                                            <dt className="text-sm font-semibold text-slate-500 mb-1">{field.label}</dt>
+                                            <dd className="text-base font-medium text-slate-900">
+                                                {field.type === "file" ? (
+                                                    values[field.id] ? (
+                                                        <a href={values[field.id]} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline flex items-center gap-1">
+                                                            View Document <ExternalLink className="w-4 h-4" />
+                                                        </a>
+                                                    ) : (
+                                                        "Not uploaded"
+                                                    )
+                                                ) : (
+                                                    values[field.id] || "Not provided"
+                                                )}
+                                            </dd>
+                                        </div>
+                                    ))}
+                                </dl>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+                <div className="flex flex-col sm:flex-row gap-4 pt-8 justify-center w-full">
+                    <Button
+                        onClick={() => executeAction({ action: ACTIONS.NAVIGATE_PAGE, target: 'home' }, router)}
+                        className="h-16 px-8 text-xl bg-primary text-primary-foreground rounded-xl font-bold hover:bg-primary/90 shadow-md flex-1 max-w-[250px]"
+                    >
+                        Back to Home
+                    </Button>
+                    <Button
+                        variant="outline"
+                        onClick={() => executeAction({ action: ACTIONS.RESTART_FORM }, router)}
+                        className="h-16 px-8 text-xl border-2 border-red-500 text-red-600 hover:bg-red-50 rounded-xl font-bold transition-all flex-1 max-w-[250px]"
+                    >
+                        Delete & Restart
+                    </Button>
+                </div>
+            </div>
+        );
+    }
+
+    const isReviewStep = currentStepIndex === schema.steps.length;
+    const currentStep = isReviewStep 
+        ? { title: "Review & Submit", id: "review_step", fields: [] } 
+        : schema.steps[currentStepIndex];
+    
     if (!currentStep) return null;
 
-    const handleNext = () => executeAction({ action: ACTIONS.NEXT }, router);
+    const handleNext = () => {
+        if (isReviewStep) {
+            executeAction({ action: ACTIONS.SUBMIT }, router);
+        } else {
+            executeAction({ action: ACTIONS.NEXT }, router);
+        }
+    };
     const handlePrev = () =>
         executeAction({ action: ACTIONS.PREVIOUS }, router);
 
@@ -454,11 +600,11 @@ export default function AccessibleForm({ formId }) {
                 <div className="mb-8 space-y-3">
                     <div className="flex items-center justify-between">
                         <span className="text-xs md:text-sm font-bold uppercase tracking-wider text-[#003441] bg-[#003441]/10 px-3.5 py-1 rounded-full">
-                            Step {currentStepIndex + 1} of {schema.steps.length}
+                            Step {Math.min(currentStepIndex + 1, schema.steps.length)} of {schema.steps.length}
                         </span>
                         <span className="text-xs md:text-sm font-bold text-slate-500">
                             {Math.round(
-                                ((currentStepIndex + 1) / schema.steps.length) *
+                                (Math.min(currentStepIndex + 1, schema.steps.length) / schema.steps.length) *
                                     100,
                             )}
                             % Complete
@@ -473,15 +619,15 @@ export default function AccessibleForm({ formId }) {
                     <div
                         className="w-full bg-slate-200 h-2.5 rounded-full overflow-hidden"
                         role="progressbar"
-                        aria-valuenow={currentStepIndex + 1}
+                        aria-valuenow={Math.min(currentStepIndex + 1, schema.steps.length)}
                         aria-valuemin={1}
                         aria-valuemax={schema.steps.length}
-                        aria-label={`Step ${currentStepIndex + 1} of ${schema.steps.length}`}
+                        aria-label={`Step ${Math.min(currentStepIndex + 1, schema.steps.length)} of ${schema.steps.length}`}
                     >
                         <div
                             className="bg-[#003441] h-full rounded-full transition-all duration-500 ease-out shadow-sm"
                             style={{
-                                width: `${((currentStepIndex + 1) / schema.steps.length) * 100}%`,
+                                width: `${(Math.min(currentStepIndex + 1, schema.steps.length) / schema.steps.length) * 100}%`,
                             }}
                         />
                     </div>
@@ -525,119 +671,161 @@ export default function AccessibleForm({ formId }) {
                 )}
 
                 <div className="space-y-6">
-                    {currentStep.fields.map((field) => {
-                        const isFocused = currentFieldId === field.id;
-                        return (
-                            <div key={field.id} className="flex flex-col gap-2">
-                                <label
-                                    htmlFor={field.id}
-                                    className="font-heading text-xl font-semibold text-foreground"
-                                >
-                                    {field.label}{" "}
-                                    {field.required && (
-                                        <span className="text-destructive">
-                                            *
-                                        </span>
-                                    )}
-                                </label>
-
-                                {field.type === "select" ? (
-                                    <select
-                                        id={field.id}
-                                        value={values[field.id] || ""}
-                                        onChange={(e) =>
-                                            useFormStore
-                                                .getState()
-                                                .updateValue(
-                                                    field.id,
-                                                    e.target.value,
-                                                    true,
-                                                )
-                                        }
-                                        className={`h-[64px] rounded-lg px-4 bg-input text-xl text-foreground border-b-2 outline-none transition-all ${
-                                            isFocused
-                                                ? "border-primary border-2"
-                                                : "border-border"
-                                        }`}
-                                    >
-                                        <option value="" disabled>
-                                            Select an option...
-                                        </option>
-                                        {field.options?.map((opt) => (
-                                            <option key={opt} value={opt}>
-                                                {opt}
-                                            </option>
+                    {isReviewStep ? (
+                        <div className="flex flex-col gap-6">
+                            <h2 className="text-3xl font-bold text-slate-800 mb-2">Review Your Application</h2>
+                            <p className="text-lg text-slate-600 mb-6">Please check all your details before submitting.</p>
+                            {schema.steps.map(step => (
+                                <div key={step.id} className="bg-white p-6 rounded-[1.5rem] shadow-sm border border-slate-200">
+                                    <h3 className="text-2xl font-bold mb-4 text-[#003441]">{step.title}</h3>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                        {step.fields.map(field => (
+                                            <div key={field.id} className="flex flex-col">
+                                                <span className="text-slate-500 text-sm font-bold uppercase tracking-wider">{field.label}</span>
+                                                <span className="text-xl font-medium text-slate-900 mt-1">
+                                                    {field.type === 'file' && values[field.id] 
+                                                        ? "Document Uploaded" 
+                                                        : values[field.id] || "Not provided"}
+                                                </span>
+                                            </div>
                                         ))}
-                                    </select>
-                                ) : field.type === "file" ? (
-                                    <div className="flex flex-col md:flex-row gap-4">
-                                        <Button
-                                            onClick={() =>
-                                                setActiveScannerTarget(field)
-                                            }
-                                            className={`h-[64px] flex-1 text-xl font-bold rounded-lg transition-all flex items-center justify-center gap-2 ${values[field.id] ? "bg-green-600 hover:bg-green-700 text-white" : "bg-primary hover:bg-primary/90 text-primary-foreground"}`}
-                                        >
-                                            {values[field.id] ? (
-                                                <>
-                                                    <CheckCircle /> Verified
-                                                    (Rescan)
-                                                </>
-                                            ) : (
-                                                <>
-                                                    <Camera /> Scan Document
-                                                </>
-                                            )}
-                                        </Button>
-                                        <Button
-                                            variant="outline"
-                                            onClick={() => {
-                                                setActiveFileTarget(field);
-                                                fileInputRef.current.click();
-                                            }}
-                                            className={`h-[64px] flex-1 text-xl font-bold rounded-lg transition-all flex items-center justify-center gap-2 border-2 ${values[field.id] ? "border-green-600 text-green-600" : "border-primary text-primary"}`}
-                                        >
-                                            {values[field.id] ? (
-                                                <>
-                                                    <CheckCircle /> Verified
-                                                    (Re-upload)
-                                                </>
-                                            ) : (
-                                                <>
-                                                    <Upload /> Upload File
-                                                </>
-                                            )}
-                                        </Button>
                                     </div>
-                                ) : (
-                                    <input
-                                        id={field.id}
-                                        type={field.type}
-                                        value={values[field.id] || ""}
-                                        onChange={(e) =>
-                                            useFormStore
-                                                .getState()
-                                                .updateValue(
-                                                    field.id,
-                                                    e.target.value,
-                                                    true,
-                                                )
-                                        }
-                                        className={`h-[64px] rounded-lg px-4 bg-input text-xl text-foreground border-b-2 outline-none transition-all ${
-                                            isFocused
-                                                ? "border-primary border-2"
-                                                : "border-border"
-                                        }`}
-                                    />
-                                )}
+                                </div>
+                            ))}
+                        </div>
+                    ) : (
+                        currentStep.fields.map((field) => {
+                            const isFocused = currentFieldId === field.id;
 
-                                {field.description && (
-                                    <p className="text-lg text-muted-foreground">
-                                        {field.description}
-                                    </p>
-                                )}
-                            </div>
-                        );
-                    })}
+                            return (
+                                <div
+                                    key={field.id}
+                                    id={`field-container-${field.id}`}
+                                    className={`flex flex-col gap-3 p-6 rounded-2xl transition-all duration-300 ${
+                                        isFocused
+                                            ? "bg-primary/5 border-2 border-primary shadow-sm scale-[1.01]"
+                                            : "bg-white hover:bg-slate-50 border-2 border-transparent"
+                                    }`}
+                                >
+                                    <label
+                                        htmlFor={field.id}
+                                        className="text-2xl font-bold text-foreground flex items-center gap-2"
+                                    >
+                                        {field.label}
+                                        {field.required && (
+                                            <span className="text-destructive">
+                                                *
+                                            </span>
+                                        )}
+                                    </label>
+
+                                    {field.type === "select" ? (
+                                        <select
+                                            id={field.id}
+                                            value={values[field.id] || ""}
+                                            onChange={(e) =>
+                                                useFormStore
+                                                    .getState()
+                                                    .updateValue(
+                                                        field.id,
+                                                        e.target.value,
+                                                        true,
+                                                    )
+                                            }
+                                            className={`h-[64px] rounded-lg px-4 bg-input text-xl text-foreground border-b-2 outline-none transition-all ${
+                                                isFocused
+                                                    ? "border-primary border-2"
+                                                    : "border-border"
+                                            }`}
+                                        >
+                                            <option value="" disabled>
+                                                Select an option...
+                                            </option>
+                                            {field.options?.map((opt) => (
+                                                <option key={opt} value={opt}>
+                                                    {opt}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    ) : field.type === "file" ? (
+                                        <div className="flex flex-col md:flex-row gap-4">
+                                            <Button
+                                                onClick={() =>
+                                                    setActiveScannerTarget(field)
+                                                }
+                                                className={`h-[64px] flex-1 text-xl font-bold rounded-lg transition-all flex items-center justify-center gap-2 ${values[field.id] ? "bg-green-600 hover:bg-green-700 text-white" : "bg-primary hover:bg-primary/90 text-primary-foreground"}`}
+                                            >
+                                                {values[field.id] ? (
+                                                    <>
+                                                        <CheckCircle /> Verified
+                                                        (Rescan)
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <Camera /> Scan Document
+                                                    </>
+                                                )}
+                                            </Button>
+                                            <Button
+                                                variant="outline"
+                                                onClick={() => {
+                                                    setActiveFileTarget(field);
+                                                    fileInputRef.current.click();
+                                                }}
+                                                className={`h-[64px] flex-1 text-xl font-bold rounded-lg transition-all flex items-center justify-center gap-2 border-2 ${values[field.id] ? "border-green-600 text-green-600" : "border-primary text-primary"}`}
+                                            >
+                                                {values[field.id] ? (
+                                                    <>
+                                                        <CheckCircle /> Verified
+                                                        (Re-upload)
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <Upload /> Upload File
+                                                    </>
+                                                )}
+                                            </Button>
+                                            {values[field.id] && (
+                                                <Button
+                                                    variant="secondary"
+                                                    onClick={() => setViewImageTarget(values[field.id])}
+                                                    className="h-[64px] flex-1 text-xl font-bold rounded-lg transition-all flex items-center justify-center gap-2 bg-slate-200 hover:bg-slate-300 text-slate-800"
+                                                >
+                                                    <Eye /> View Document
+                                                </Button>
+                                            )}
+                                        </div>
+                                    ) : (
+                                        <input
+                                            id={field.id}
+                                            type={field.type}
+                                            value={values[field.id] || ""}
+                                            onChange={(e) =>
+                                                useFormStore
+                                                    .getState()
+                                                    .updateValue(
+                                                        field.id,
+                                                        e.target.value,
+                                                        true,
+                                                    )
+                                            }
+                                            className={`h-[64px] rounded-lg px-4 bg-input text-xl text-foreground border-b-2 outline-none transition-all ${
+                                                isFocused
+                                                    ? "border-primary border-2"
+                                                    : "border-border"
+                                            }`}
+                                        />
+                                    )}
+
+                                    {field.description && (
+                                        <p className="text-lg text-muted-foreground">
+                                            {field.description}
+                                        </p>
+                                    )}
+                                </div>
+                            );
+                        })
+                    )}
                 </div>
             </div>
 
@@ -652,10 +840,11 @@ export default function AccessibleForm({ formId }) {
                 </Button>
                 <Button
                     onClick={handleNext}
-                    className="h-[56px] px-8 text-xl bg-primary text-primary-foreground rounded-lg font-semibold hover:bg-primary/90 shadow-none"
+                    disabled={isReviewStep && isSubmitted}
+                    className={`h-[56px] px-8 text-xl text-primary-foreground rounded-lg font-semibold shadow-none ${isReviewStep && isSubmitted ? 'bg-slate-400 opacity-50 cursor-not-allowed' : 'bg-primary hover:bg-primary/90'}`}
                 >
-                    {currentStepIndex === schema.steps.length - 1
-                        ? "Review & Submit"
+                    {isReviewStep
+                        ? isSubmitted ? "Already Submitted" : "Submit Application"
                         : "Next Step"}
                 </Button>
             </div>
@@ -700,6 +889,22 @@ export default function AccessibleForm({ formId }) {
                             >
                                 Cancel
                             </Button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {viewImageTarget && (
+                <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex flex-col items-center justify-center p-6" onClick={() => setViewImageTarget(null)}>
+                    <div className="bg-white p-4 rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] flex flex-col gap-4" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex justify-between items-center">
+                            <h2 className="text-2xl font-bold">Document Preview</h2>
+                            <Button variant="ghost" size="icon" onClick={() => setViewImageTarget(null)}>
+                                <X className="w-8 h-8" />
+                            </Button>
+                        </div>
+                        <div className="flex-1 overflow-auto rounded-lg border-2 border-slate-200 flex items-center justify-center bg-slate-50">
+                            <img src={viewImageTarget} alt="Document Preview" className="max-w-full max-h-[75vh] object-contain" />
                         </div>
                     </div>
                 </div>

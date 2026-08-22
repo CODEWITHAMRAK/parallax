@@ -1,9 +1,11 @@
 import useFormStore from '../store/useFormStore.js';
 import useNavigationStore from '../store/useNavigationStore.js';
+import useLocalizationStore from '../store/useLocalizationStore.js';
 import { ACTIONS } from './navigation.js';
 import { validateField } from './validation.js';
 
 export const executeAction = (action, router) => {
+  const t = useLocalizationStore.getState().t;
   const formStore = useFormStore.getState();
   const navStore = useNavigationStore.getState();
   
@@ -97,6 +99,12 @@ export const executeAction = (action, router) => {
 
     case ACTIONS.NEXT:
       if (!schema) return;
+      
+      if (navStore.currentStepIndex >= schema.steps.length) {
+        navStore.setSystemMessage(action.message || "You are already on the last step.");
+        break;
+      }
+      
       const currentStep = schema.steps[navStore.currentStepIndex];
       let missingField = null;
       for (const field of currentStep.fields) {
@@ -140,11 +148,16 @@ export const executeAction = (action, router) => {
       break;
 
     case ACTIONS.SUBMIT:
-      navStore.setSystemMessage(action.message || t('submitting_application'));
-      // Handle submission logic (API call)
+      navStore.setSystemMessage(action.message || t('submitting'));
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('trigger-submit'));
+      }
       break;
 
     case ACTIONS.RESTART_FORM:
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('trigger-restart'));
+      }
       formStore.resetForm();
       navStore.resetNavigation(action.message || t('form_restarted'));
       break;

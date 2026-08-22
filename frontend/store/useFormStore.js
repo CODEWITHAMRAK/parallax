@@ -8,6 +8,7 @@ const useFormStore = create((set, get) => ({
   loadingSchema: false,
   draftLoaded: false,
   error: null,
+  isSubmitted: false,
 
   loadSchema: async (formId) => {
     set({ loadingSchema: true, error: null, draftLoaded: false });
@@ -49,16 +50,17 @@ const useFormStore = create((set, get) => ({
 
   resetForm: () => {
     set((state) => {
-      if (!state.schema) return state;
-      const initialValues = {};
-      const initialCompleted = {};
-      state.schema.steps.forEach(step => {
-        step.fields.forEach(field => {
-          initialValues[field.id] = "";
-          initialCompleted[field.id] = false;
+      const resetValues = {};
+      const resetCompleted = {};
+      if (state.schema) {
+        state.schema.steps.forEach(step => {
+          step.fields.forEach(field => {
+            resetValues[field.id] = "";
+            resetCompleted[field.id] = false;
+          });
         });
-      });
-      return { values: initialValues, completed: initialCompleted };
+      }
+      return { values: resetValues, completed: resetCompleted, isSubmitted: false };
     });
   }
 }));

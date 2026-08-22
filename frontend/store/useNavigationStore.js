@@ -71,7 +71,7 @@ const useNavigationStore = create(
 
       nextStep: (totalSteps, message = "") => {
         set((state) => {
-          if (state.currentStepIndex < totalSteps - 1) {
+          if (state.currentStepIndex < totalSteps) {
             const nextIndex = state.currentStepIndex + 1;
             const history = state.stepHistory[nextIndex] || [];
             const assistantMsgs = history.filter(m => m.role === 'assistant');
