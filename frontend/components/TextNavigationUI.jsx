@@ -115,8 +115,9 @@ export default function TextNavigationUI({ inline = false }) {
                     console.warn(
                         "[TextNavUI Debug] Transcription failed or returned empty. Prompting user to repeat.",
                     );
-                    useNavigationStore.getState().setSystemMessage(t('didnt_catch'));
-                    await playSystemAudio("didnt_catch");
+                    const msg = t('didnt_catch');
+                    useNavigationStore.getState().setSystemMessage(msg);
+                    await speak(msg);
                     const currentMode = document.getElementById('interaction-mode-indicator')?.dataset?.mode;
                     if (currentMode === 'voice') window.dispatchEvent(new Event('start-voice-turn'));
                 }
@@ -137,8 +138,9 @@ export default function TextNavigationUI({ inline = false }) {
             pauseListening(); // Manually pause the VAD because it never heard anything
 
             console.log("[TextNavUI Debug] Prompting 'Are you still there?'");
-            useNavigationStore.getState().setSystemMessage(t('still_there'));
-            await playSystemAudio("are_you_there");
+            const msg = t('still_there');
+            useNavigationStore.getState().setSystemMessage(msg);
+            await speak(msg);
             const currentMode = document.getElementById('interaction-mode-indicator')?.dataset?.mode;
             if (currentMode === 'voice') window.dispatchEvent(new Event('start-voice-turn'));
         }, 12000);
@@ -162,14 +164,15 @@ export default function TextNavigationUI({ inline = false }) {
         setLoading(true);
 
         try {
-            const currentStep = formState.schema ? formState.schema.steps[navState.currentStepIndex] : null;
-            const currentField = currentStep
+            const isFormPage = navState.currentPage === 'form' || (typeof window !== 'undefined' && window.location.pathname.includes('/form/'));
+            const currentStep = (isFormPage && formState.schema) ? formState.schema.steps[navState.currentStepIndex] : null;
+            const currentField = (isFormPage && currentStep)
                 ? currentStep.fields.find((f) => f.id === navState.currentFieldId)
                 : null;
 
             const context = {
-                chat_history: navState.stepHistory[navState.currentStepIndex] || [],
-                current_page: navState.currentPage,
+                chat_history: isFormPage ? (navState.stepHistory[navState.currentStepIndex] || []) : [],
+                current_page: isFormPage ? 'form' : 'home',
                 form_title: formState.schema?.title,
                 current_step: currentStep
                     ? {
@@ -185,8 +188,8 @@ export default function TextNavigationUI({ inline = false }) {
                           type: currentField.type,
                       }
                     : null,
-                form_values: formState.values,
-                available_steps: formState.schema ? formState.schema.steps.map((s) => s.id) : [],
+                form_values: isFormPage ? formState.values : {},
+                available_steps: (isFormPage && formState.schema) ? formState.schema.steps.map((s) => s.id) : [],
                 language: navState.language,
             };
 
@@ -197,19 +200,24 @@ export default function TextNavigationUI({ inline = false }) {
 
             // Explicitly speak only if in voice mode
             if (action.message && currentMode === "voice") {
-                let playbackStarted = false;
-                speak(action.message, () => {
-                    playbackStarted = true;
+                const isScannerAction = action.action === "OPEN_SCANNER";
+                
+                // For non-scanner actions, execute immediately so UI responds while speaking
+                if (!isScannerAction) {
+                    executeAction(action, router);
+                }
+
+                await speak(action.message, () => {
+                    setLoading(false);
+                });
+
+                // For scanner action, open scanner ONLY after speaking has finished completely
+                if (isScannerAction) {
                     executeAction(action, router);
                     setLoading(false);
-                }).then(() => {
-                    if (!playbackStarted) {
-                        // Fallback in case TTS failed or onplay never fired
-                        executeAction(action, router);
-                        setLoading(false);
-                    }
-                    
-                    // If in voice mode, automatically start listening again after speaking
+                } else {
+                    setLoading(false);
+                    // If in voice mode and not opening scanner, resume voice turn
                     setTimeout(() => {
                         const modeAfterSpeak = document.getElementById(
                             "interaction-mode-indicator",
@@ -218,7 +226,7 @@ export default function TextNavigationUI({ inline = false }) {
                             window.dispatchEvent(new Event('start-voice-turn'));
                         }
                     }, 100);
-                });
+                }
             } else {
                 executeAction(action, router);
                 setLoading(false);
@@ -344,10 +352,12 @@ export default function TextNavigationUI({ inline = false }) {
 
                 {/* System Message */}
                 <div className="flex items-start gap-4">
-                    <div className="w-12 h-12 rounded-full bg-primary flex items-center justify-center shrink-0">
-                        <span className="text-primary-foreground font-bold text-xl">
-                            P
-                        </span>
+                    <div className="w-12 h-12 rounded-full bg-white border border-slate-200 shadow-sm flex items-center justify-center shrink-0 p-1.5 overflow-hidden">
+                        <img 
+                            src="/logo.png" 
+                            alt="Parallax Assistant" 
+                            className="w-full h-full object-contain"
+                        />
                     </div>
                     <div className="flex-1 bg-muted rounded-2xl p-4 md:p-5 rounded-tl-sm text-foreground text-xl font-medium shadow-sm">
                         {loading || isProcessing ? (

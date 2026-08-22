@@ -1,24 +1,50 @@
 "use client";
 
-import React from 'react';
+import React, { useEffect } from 'react';
 import { signOut, useSession } from 'next-auth/react';
 import { Button } from './ui/button';
 import useNavigationStore from '../store/useNavigationStore';
-import { updateUserLanguage } from '../lib/apiService';
+import useLocalizationStore from '../store/useLocalizationStore';
+import { updateUserLanguage, getUserProfile } from '../lib/apiService';
 
 import Link from 'next/link';
 import { Home } from 'lucide-react';
 
 export default function Navbar() {
-  const { data: session } = useSession();
+  const { data: session, status } = useSession();
   const language = useNavigationStore((state) => state.language);
   const setLanguage = useNavigationStore((state) => state.setLanguage);
+
+  useEffect(() => {
+    const syncProfileLanguage = async () => {
+      if (status === 'authenticated') {
+        try {
+          const res = await getUserProfile();
+          if (res?.data?.user?.preferredLanguage) {
+            const dbLang = res.data.user.preferredLanguage;
+            setLanguage(dbLang);
+            useLocalizationStore.getState().fetchDictionary(dbLang);
+            return;
+          }
+        } catch (e) {
+          console.warn("Could not fetch user profile for language sync:", e);
+        }
+      }
+      
+      if (language) {
+        useLocalizationStore.getState().fetchDictionary(language);
+      }
+    };
+    
+    syncProfileLanguage();
+  }, [status, setLanguage]);
 
   const handleLanguageChange = async (e) => {
     const newLang = e.target.value;
     setLanguage(newLang);
     try {
       await updateUserLanguage(newLang);
+      await useLocalizationStore.getState().fetchDictionary(newLang);
     } catch (err) {
       console.error("Failed to sync language to backend:", err);
     }
@@ -27,7 +53,8 @@ export default function Navbar() {
   return (
     <nav className="w-full border-b border-slate-200 bg-white px-4 md:px-6 py-3.5 flex flex-wrap items-center justify-between gap-y-3 z-50 sticky top-0 shadow-sm">
       <div className="flex items-center gap-2 md:gap-3">
-        <Link href="/home" className="flex items-center gap-2 hover:opacity-85 transition-opacity">
+        <Link href="/home" className="flex items-center gap-2.5 hover:opacity-85 transition-opacity">
+          <img src="/logo.png" alt="Parallax Logo" className="w-8 h-8 object-contain rounded-md" />
           <span className="font-heading text-xl md:text-2xl font-bold text-[#003441] tracking-tight">
             Parallax
           </span>

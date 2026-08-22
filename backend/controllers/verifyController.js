@@ -25,6 +25,19 @@ You MUST return ONLY valid JSON matching this exact schema:
   "reason": "A brief 1-sentence explanation of your decision. If it fails, explain why (e.g. 'This appears to be a marksheet, not an income certificate.'). If it succeeds, just say 'Document looks good.'"
 }`;
 
+    let normalizedDataUrl = fileDataUrl.trim();
+    if (normalizedDataUrl.startsWith("data:image/jpg;")) {
+      normalizedDataUrl = normalizedDataUrl.replace("data:image/jpg;", "data:image/jpeg;");
+    }
+
+    if (normalizedDataUrl.startsWith("data:application/pdf")) {
+      return res.status(200).json({
+        documentMatch: false,
+        readable: false,
+        reason: "PDF could not be parsed as an image. Please try again."
+      });
+    }
+
     const response = await fetch("https://api.xiaomimimo.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -38,7 +51,7 @@ You MUST return ONLY valid JSON matching this exact schema:
             role: "user", 
             content: [
               { type: "text", text: prompt },
-              { type: "image_url", image_url: { url: fileDataUrl } }
+              { type: "image_url", image_url: { url: normalizedDataUrl } }
             ]
           }
         ],
@@ -51,12 +64,21 @@ You MUST return ONLY valid JSON matching this exact schema:
 
     if (!response.ok) {
       const errText = await response.text();
-      throw new Error(`LLM Vision API Error: ${response.status} ${errText}`);
+      console.error(`LLM Vision API Error: ${response.status} ${errText}`);
+      return res.status(200).json({
+        documentMatch: false,
+        readable: false,
+        reason: "The document image could not be processed. Please capture or upload again clearly."
+      });
     }
 
     const data = await response.json();
     if (!data.choices || data.choices.length === 0) {
-      throw new Error("No choices returned from LLM API");
+      return res.status(200).json({
+        documentMatch: false,
+        readable: false,
+        reason: "No response from document verification."
+      });
     }
 
     let content = data.choices[0].message.content.trim();
@@ -64,7 +86,11 @@ You MUST return ONLY valid JSON matching this exact schema:
     
     const jsonMatch = content.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
-      throw new Error(`Failed to find JSON object in LLM response: ${content}`);
+      return res.status(200).json({
+        documentMatch: false,
+        readable: false,
+        reason: "Failed to verify document image."
+      });
     }
 
     const parsedResult = JSON.parse(jsonMatch[0]);
@@ -80,8 +106,7 @@ You MUST return ONLY valid JSON matching this exact schema:
 
   } catch (error) {
     console.error("Document Verification Error:", error);
-    // On error, let the frontend know verification failed so they can try again.
-    return res.status(500).json({ 
+    return res.status(200).json({ 
       documentMatch: false, 
       readable: false, 
       reason: "An error occurred during verification. Please try again." 

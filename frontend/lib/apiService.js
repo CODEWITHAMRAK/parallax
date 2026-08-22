@@ -50,6 +50,14 @@ export const updateUserLanguage = async (language) => {
   return await response.json();
 };
 
+export const getUserProfile = async () => {
+  const response = await apiFetch(`/api/user/me`);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch profile: ${response.statusText}`);
+  }
+  return await response.json();
+};
+
 export const autofillFromDocumentApi = async (fileDataUrl, fields) => {
   const response = await apiFetch(`/api/upload/autofill`, {
     method: "POST",

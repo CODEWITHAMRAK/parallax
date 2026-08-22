@@ -84,10 +84,16 @@ export default function AccessibleForm({ formId }) {
     const fetchingRef = useRef(false);
 
     useEffect(() => {
+        useNavigationStore.getState().setPage('form');
+    }, []);
+
+    useEffect(() => {
+        const hasAssistantGreeting = stepHistory && stepHistory[currentStepIndex] && stepHistory[currentStepIndex].some(m => m.role === 'assistant');
+
         if (
             schema &&
             schema.steps[currentStepIndex] &&
-            (!stepHistory || !stepHistory[currentStepIndex]) &&
+            !hasAssistantGreeting &&
             draftLoaded &&
             !fetchingRef.current
         ) {
@@ -108,7 +114,7 @@ export default function AccessibleForm({ formId }) {
                         available_steps: schema.steps.map((s) => s.id),
                     };
                     const action = await fetchChatAction(
-                        "I just entered this step. Please greet me and ask for the first missing field.",
+                        "I just entered this step. Please greet me, inform me that I can either tell you the details or upload/scan a relevant document to autofill this step automatically, and ask for the first field.",
                         context,
                     );
                     if (action.message) {
@@ -136,7 +142,7 @@ export default function AccessibleForm({ formId }) {
             };
             fetchGreeting();
         }
-    }, [currentStepIndex, schema, stepHistory, setSystemMessage, draftLoaded]);
+    }, [currentStepIndex, schema, stepHistory, setSystemMessage, draftLoaded, speak]);
 
     // Handle custom events for scanning and picking files
     useEffect(() => {
@@ -178,27 +184,51 @@ export default function AccessibleForm({ formId }) {
     }, [schema, currentStepIndex]);
 
     const processFileToDataUrl = async (file) => {
-        if (file.type === "application/pdf") {
-            const pdfjsLib = await import("pdfjs-dist");
-            pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
-            const arrayBuffer = await file.arrayBuffer();
-            const pdf = await pdfjsLib.getDocument({ data: arrayBuffer })
-                .promise;
-            const page = await pdf.getPage(1);
-            const viewport = page.getViewport({ scale: 1.5 });
-            const canvas = document.createElement("canvas");
-            const context = canvas.getContext("2d");
-            canvas.height = viewport.height;
-            canvas.width = viewport.width;
-            await page.render({ canvasContext: context, viewport }).promise;
-            return canvas.toDataURL("image/jpeg", 0.8);
-        } else {
-            return new Promise((resolve) => {
-                const reader = new FileReader();
-                reader.onload = (e) => resolve(e.target.result);
-                reader.readAsDataURL(file);
-            });
+        if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
+            try {
+                const pdfjsLib = await import("pdfjs-dist");
+                pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
+                const arrayBuffer = await file.arrayBuffer();
+                const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+                const pdf = await loadingTask.promise;
+                const page = await pdf.getPage(1);
+                const viewport = page.getViewport({ scale: 2.0 });
+                const canvas = document.createElement("canvas");
+                const context = canvas.getContext("2d");
+                canvas.height = viewport.height;
+                canvas.width = viewport.width;
+                await page.render({ canvasContext: context, viewport }).promise;
+                return canvas.toDataURL("image/jpeg", 0.92);
+            } catch (err) {
+                console.error("PDF rendering error:", err);
+                throw new Error("Could not process PDF file. Please upload an image or scan with camera.");
+            }
         }
+
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const img = new Image();
+                img.onload = () => {
+                    const canvas = document.createElement("canvas");
+                    canvas.width = img.naturalWidth || img.width;
+                    canvas.height = img.naturalHeight || img.height;
+                    const ctx = canvas.getContext("2d");
+                    ctx.drawImage(img, 0, 0);
+                    resolve(canvas.toDataURL("image/jpeg", 0.9));
+                };
+                img.onerror = () => {
+                    let raw = e.target.result;
+                    if (raw && raw.startsWith("data:image/jpg;")) {
+                        raw = raw.replace("data:image/jpg;", "data:image/jpeg;");
+                    }
+                    resolve(raw);
+                };
+                img.src = e.target.result;
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+        });
     };
 
     const handleFileChange = async (e) => {
@@ -212,7 +242,8 @@ export default function AccessibleForm({ formId }) {
                 await handleProcessDocument(dataUrl, target);
             } catch (err) {
                 console.error(err);
-                setSystemMessage("Failed to process the uploaded file.");
+                const msg = "SYSTEM: Document upload processing failed. Politely tell the user that the document could not be read, and ask them to tell the first missing required field or try scanning again.";
+                await dispatchBackgroundSystemMessage(msg);
             }
         }
     };
@@ -281,7 +312,7 @@ export default function AccessibleForm({ formId }) {
                     const msg = `SYSTEM: Document autofill complete. Extracted: ${JSON.stringify(response.extractedData)}. Say the fields you extracted and ask for any remaining required fields.`;
                     await dispatchBackgroundSystemMessage(msg);
                 } else {
-                    const msg = `SYSTEM: Document autofill failed. Reason: ${response.reason}. Politely tell the user to try again or fill manually.`;
+                    const msg = `SYSTEM: Document autofill failed. Reason: ${response.reason || "Image unreadable"}. Politely tell the user to try again or tell the details directly.`;
                     await dispatchBackgroundSystemMessage(msg);
                 }
             } else {
@@ -315,8 +346,9 @@ export default function AccessibleForm({ formId }) {
                 }
             }
         } catch (err) {
-            console.error(err);
-            setSystemMessage("An error occurred during processing.");
+            console.error("handleProcessDocument error:", err);
+            const msg = `SYSTEM: Document processing encountered an error. Politely tell the user that the document image could not be processed, and ask them to tell the first missing required field or try scanning again.`;
+            await dispatchBackgroundSystemMessage(msg);
         } finally {
             setIsProcessing(false);
         }
@@ -373,40 +405,49 @@ export default function AccessibleForm({ formId }) {
             />
 
             <div>
-                <div className="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
-                    <div>
-                        <p className="font-heading text-sm text-muted-foreground mb-2 tracking-widest uppercase font-bold">
-                            Step {currentStepIndex + 1} of {schema.steps.length}
-                        </p>
-                        <h2 className="font-heading text-3xl font-semibold text-primary">
-                            {currentStep.title}
-                        </h2>
-                    </div>
-
-                    <div className="flex gap-2">
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                                setActiveScannerTarget("autofill");
-                            }}
-                            className="flex items-center gap-2 bg-primary/5 hover:bg-primary/10 border-primary/20 text-primary"
-                        >
-                            <Camera className="w-4 h-4" /> Scan to Autofill
-                        </Button>
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                                setActiveFileTarget("autofill");
-                                fileInputRef.current.click();
-                            }}
-                            className="flex items-center gap-2 bg-primary/5 hover:bg-primary/10 border-primary/20 text-primary"
-                        >
-                            <Upload className="w-4 h-4" /> Upload to Autofill
-                        </Button>
-                    </div>
+                <div className="mb-6">
+                    <p className="font-heading text-sm text-muted-foreground mb-1 tracking-widest uppercase font-bold">
+                        Step {currentStepIndex + 1} of {schema.steps.length}
+                    </p>
+                    <h2 className="font-heading text-3xl md:text-4xl font-bold text-primary tracking-tight">
+                        {currentStep.title}
+                    </h2>
                 </div>
+
+                {/* Impairment-Friendly Big Button Autofill Bar */}
+                {currentStep.fields.some(f => f.type !== 'file') && (
+                    <div className="mb-8 p-4 md:p-5 rounded-2xl bg-[#003441]/5 border-2 border-[#003441]/20">
+                        <div className="flex items-center gap-2 mb-3">
+                            <Sparkles className="w-5 h-5 text-[#003441]" />
+                            <p className="text-base md:text-lg font-bold text-[#003441]">
+                                Autofill this step with a document:
+                            </p>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 md:gap-4">
+                            <Button
+                                type="button"
+                                onClick={() => setActiveScannerTarget("autofill")}
+                                className="h-16 md:h-18 px-6 rounded-2xl bg-[#003441] hover:bg-[#002833] text-white text-lg md:text-xl font-bold flex items-center justify-center gap-3 shadow-md hover:scale-[1.01] active:scale-[0.98] transition-all"
+                            >
+                                <Camera className="w-6 h-6 md:w-7 md:h-7 shrink-0" />
+                                <span>Scan Document</span>
+                            </Button>
+                            <Button
+                                type="button"
+                                variant="outline"
+                                onClick={() => {
+                                    setActiveFileTarget("autofill");
+                                    fileInputRef.current.click();
+                                }}
+                                className="h-16 md:h-18 px-6 rounded-2xl bg-white hover:bg-slate-100 border-2 border-slate-300 text-[#003441] text-lg md:text-xl font-bold flex items-center justify-center gap-3 shadow-sm hover:scale-[1.01] active:scale-[0.98] transition-all"
+                            >
+                                <Upload className="w-6 h-6 md:w-7 md:h-7 shrink-0" />
+                                <span>Upload PDF / Photo</span>
+                            </Button>
+                        </div>
+                    </div>
+                )}
 
                 <div className="space-y-6">
                     {currentStep.fields.map((field) => {

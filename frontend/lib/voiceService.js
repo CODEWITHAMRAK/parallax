@@ -1,3 +1,5 @@
+import useLocalizationStore from "../store/useLocalizationStore.js";
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
 export class VoiceController {
@@ -254,10 +256,21 @@ export class VoiceController {
       this.audioElement.onerror = (e) => {
         console.error("System audio playback error:", e);
         console.warn(`System audio for ${type} in ${validLang} not found, falling back to TTS...`);
-        let fallbackText = "Sorry, I didn't catch that.";
-        if (type === "are_you_there") fallbackText = "Are you still there?";
-        if (type === "network_error") fallbackText = "I'm having trouble connecting.";
+        let fallbackText = "Sorry, I didn't catch that. Could you please repeat?";
+        if (type === "are_you_there" || type === "still_there") fallbackText = "Are you still there? Please say something or tap the mic.";
+        if (type === "network_error" || type === "connection_trouble") fallbackText = "Sorry, I'm having trouble connecting right now.";
         
+        try {
+          const t = useLocalizationStore?.getState()?.t;
+          if (t) {
+            if (type === "didnt_catch" || type === "didnt_understand") fallbackText = t('didnt_catch');
+            else if (type === "are_you_there" || type === "still_there") fallbackText = t('still_there');
+            else if (type === "network_error" || type === "connection_trouble") fallbackText = t('connection_trouble');
+          }
+        } catch (err) {
+          console.warn("Could not retrieve localized string from store:", err);
+        }
+
         this.isSpeaking = false;
         this.speak(fallbackText, validLang).then(resolve).catch(reject);
       };

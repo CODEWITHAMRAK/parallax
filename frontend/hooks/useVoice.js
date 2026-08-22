@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 import { useState, useCallback, useRef } from 'react';
 import { voiceService } from '../lib/voiceService';
 import useLocalizationStore from '../store/useLocalizationStore';
@@ -12,11 +13,18 @@ export const VoiceState = {
   ERROR: 'error'
 };
 
-// Global state for interaction mode so it persists across pages/components
-export const useVoiceStore = create((set) => ({
-  interactionMode: 'text',
-  setInteractionMode: (mode) => set({ interactionMode: mode }),
-}));
+// Global state for interaction mode so it persists across pages/components/reloads
+export const useVoiceStore = create(
+  persist(
+    (set) => ({
+      interactionMode: 'text',
+      setInteractionMode: (mode) => set({ interactionMode: mode }),
+    }),
+    {
+      name: 'voice-mode-storage', // name of the item in the storage (must be unique)
+    }
+  )
+);
 
 const LANG_MAP = {
   'English': 'en-IN',
@@ -151,6 +159,14 @@ export function useVoice() {
     const audioUrl = `/audio/scanner/${langCode}/${key}.wav`;
 
     const isHighPriority = ["document_captured", "looks_good", "try_again", "upload_failed"].includes(key);
+
+    // Prevent overlapping with active AI speech
+    if (voiceService.isSpeaking) {
+      if (!isHighPriority) {
+        return;
+      }
+      voiceService.stopSpeaking();
+    }
 
     // If something is currently playing
     if (scannerAudioRef.current && !scannerAudioRef.current.paused) {

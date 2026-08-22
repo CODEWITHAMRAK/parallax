@@ -44,7 +44,7 @@ export const executeAction = (action, router) => {
     case ACTIONS.NAVIGATE_PAGE:
       if (action.target === 'home') {
         navStore.setPage('home');
-        router.push('/');
+        router.push('/home');
         navStore.setSystemMessage(action.message || t('navigating_home'));
       } else if (action.target === 'scholarship_application' || action.target === 'form' || action.target === 'scholarship_form') {
         navStore.setPage('form');

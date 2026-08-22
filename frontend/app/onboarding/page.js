@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import useNavigationStore from '@/store/useNavigationStore';
 import useLocalizationStore from '@/store/useLocalizationStore';
-import { useVoiceStore } from '@/hooks/useVoice';
+import { useVoice } from '@/hooks/useVoice';
 import { updateUserLanguage } from '@/lib/apiService';
 import { Button } from '@/components/ui/button';
 
@@ -50,12 +50,21 @@ export default function LanguageSelectionPage() {
   const router = useRouter();
   const { data: session, status } = useSession();
   const setStoreLanguage = useNavigationStore((state) => state.setLanguage);
-  const setInteractionMode = useVoiceStore((state) => state.setInteractionMode);
+  const { interactionMode, setInteractionMode, startListening, pauseListening, playSystemAudio, speak, stopSpeaking } = useVoice();
   
+  const [step, setStep] = useState('mode'); // 'mode' | 'language'
   const [recommendedLang, setRecommendedLang] = useState(LANGUAGES[0]);
   const [otherLangs, setOtherLangs] = useState(LANGUAGES.slice(1));
   const [loading, setLoading] = useState(true);
-  const [showModeSelection, setShowModeSelection] = useState(false);
+  const [voiceStatusMsg, setVoiceStatusMsg] = useState('');
+
+  // Stop any voice activity on unmount
+  useEffect(() => {
+    return () => {
+      pauseListening();
+      stopSpeaking();
+    };
+  }, [pauseListening, stopSpeaking]);
 
   useEffect(() => {
     if (status === "unauthenticated") {
@@ -64,31 +73,21 @@ export default function LanguageSelectionPage() {
     }
 
     if (status === "authenticated") {
-      if (session?.user?.preferredLanguage) {
-        const preferredLang = session.user.preferredLanguage;
-        setStoreLanguage(preferredLang);
-        useLocalizationStore.getState().fetchDictionary(preferredLang).then(() => {
-          setShowModeSelection(true);
-          setLoading(false);
-        });
-      } else {
-        fetchLocationAndSetLanguage();
-      }
+      // Regardless of whether they have a preferred language or not, 
+      // the new flow says: "first show them the normal or no touch mode when user logs in"
+      fetchLocationAndSetLanguage();
+      setLoading(false);
     }
-  }, [status, session, router, setStoreLanguage]);
+  }, [status, session, router]);
 
   const fetchLocationAndSetLanguage = () => {
     if (!navigator.geolocation) {
-      console.warn("Geolocation is not supported by this browser.");
-      setLoading(false);
       return;
     }
-
     navigator.geolocation.getCurrentPosition(
       async (position) => {
         try {
           const { latitude, longitude } = position.coords;
-          // Use BigDataCloud's free client-side reverse geocoding API
           const response = await fetch(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${latitude}&longitude=${longitude}&localityLanguage=en`);
           if (response.ok) {
             const data = await response.json();
@@ -103,13 +102,10 @@ export default function LanguageSelectionPage() {
           }
         } catch (error) {
           console.error("Error with reverse geocoding:", error);
-        } finally {
-          setLoading(false);
         }
       },
       (error) => {
-        console.warn("Geolocation error (user might have denied):", error);
-        setLoading(false); // Fallback to English defaults
+        console.warn("Geolocation error:", error);
       },
       { timeout: 10000 }
     );
@@ -119,16 +115,62 @@ export default function LanguageSelectionPage() {
     try {
       await updateUserLanguage(languageName);
       setStoreLanguage(languageName);
-      
-      // Fetch localized dictionary for the chosen language
       await useLocalizationStore.getState().fetchDictionary(languageName);
-
       router.push('/home');
     } catch (error) {
       console.error("Failed to save language:", error);
       setStoreLanguage(languageName);
       useLocalizationStore.getState().fetchDictionary(languageName);
       router.push('/home');
+    }
+  };
+
+  const startVoiceLanguageSelection = async () => {
+    setVoiceStatusMsg("Speaking...");
+    try {
+      await playSystemAudio('ask_language'); // Plays our pre-saved English, Kannada, Hindi audio
+    } catch (err) {
+      console.warn("Could not play ask_language, trying TTS directly...", err);
+      await speak("Please choose your language. Which language do you speak? ನೀವು ಯಾವ ಭಾಷೆಯನ್ನು ಮಾತನಾಡುತ್ತೀರಿ? आप कौन सी भाषा बोलते हैं?");
+    }
+
+    setVoiceStatusMsg("Listening...");
+    startListening(
+      async (transcribed) => {
+        if (transcribed) {
+          setVoiceStatusMsg("Processing...");
+          const lower = transcribed.toLowerCase();
+          
+          let matchedLang = null;
+          for (const lang of LANGUAGES) {
+            if (lower.includes(lang.name.toLowerCase()) || lower.includes(lang.native.toLowerCase())) {
+              matchedLang = lang.name;
+              break;
+            }
+          }
+
+          if (matchedLang) {
+            await speak(`Setting language to ${matchedLang}`);
+            handleLanguageSelect(matchedLang);
+          } else {
+            await speak("Sorry, I didn't catch that. Please tell me your language again.");
+            startVoiceLanguageSelection();
+          }
+        } else {
+          startVoiceLanguageSelection(); // Try again
+        }
+      },
+      () => {
+        setVoiceStatusMsg("Recording...");
+      }
+    );
+  };
+
+  const selectMode = (mode) => {
+    setInteractionMode(mode);
+    setStep('language');
+    if (mode === 'voice') {
+      startVoiceLanguageSelection();
     }
   };
 
@@ -140,24 +182,26 @@ export default function LanguageSelectionPage() {
     );
   }
 
-  if (showModeSelection) {
+  if (step === 'mode') {
     return (
       <main className="min-h-screen bg-[#fcf9f8] flex flex-col items-center justify-center p-6 md:p-12">
-        <div className="w-full max-w-[800px] text-center mb-16 mt-8">
+        <div className="w-full max-w-[800px] text-center mb-16 mt-8 flex flex-col items-center">
+          <img 
+            src="/logo.png" 
+            alt="Parallax Logo" 
+            className="w-20 h-20 md:w-24 md:h-24 object-contain rounded-2xl shadow-md border border-slate-100 p-2 bg-white mb-6"
+          />
           <h1 className="font-heading text-5xl md:text-6xl text-[#003441] tracking-tight font-bold mb-4">
-            Welcome back!
+            Welcome to Parallax!
           </h1>
           <p className="text-xl md:text-2xl text-muted-foreground">
-            How would you like to use Parallax today?
+            How would you like to interact today?
           </p>
         </div>
 
         <div className="w-full max-w-[900px] flex flex-col md:flex-row items-center gap-8 justify-center">
           <Button 
-            onClick={() => {
-              setInteractionMode('text');
-              router.push('/home');
-            }}
+            onClick={() => selectMode('text')}
             className="w-full md:w-1/2 h-[220px] rounded-3xl bg-white border-4 border-slate-200 hover:border-[#003441] flex flex-col items-center justify-center shadow-lg transition-all group"
             variant="outline"
           >
@@ -170,10 +214,7 @@ export default function LanguageSelectionPage() {
           </Button>
 
           <Button 
-            onClick={() => {
-              setInteractionMode('voice');
-              router.push('/home');
-            }}
+            onClick={() => selectMode('voice')}
             className="w-full md:w-1/2 h-[220px] rounded-3xl bg-[#003441] text-white flex flex-col items-center justify-center shadow-xl hover:scale-105 transition-transform group"
           >
             <span className="text-4xl font-bold mb-4">
@@ -188,9 +229,45 @@ export default function LanguageSelectionPage() {
     );
   }
 
+  if (step === 'language' && interactionMode === 'voice') {
+    return (
+      <main className="min-h-screen bg-[#fcf9f8] flex flex-col items-center justify-center p-6 md:p-12 pb-24 relative">
+        <div className="w-full max-w-[800px] text-center space-y-8">
+          <div className="w-32 h-32 md:w-48 md:h-48 rounded-full bg-[#003441] text-white flex items-center justify-center mx-auto mb-8 animate-pulse shadow-2xl">
+            <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+              <line x1="12" y1="19" x2="12" y2="22"/>
+            </svg>
+          </div>
+          <h1 className="font-heading text-4xl md:text-5xl text-[#003441] tracking-tight font-bold">
+            {voiceStatusMsg}
+          </h1>
+          <p className="text-xl text-muted-foreground">
+            Please speak your language (English, Hindi, Kannada, etc.)
+          </p>
+          <div className="pt-4 pb-8">
+            <div className="flex flex-wrap justify-center gap-3 max-w-[600px] mx-auto">
+              {LANGUAGES.map(lang => (
+                <div key={lang.code} className="px-4 py-2 bg-white rounded-full border border-slate-200 shadow-sm text-slate-600 font-medium text-sm md:text-base">
+                  {lang.native} ({lang.name})
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="pt-4">
+            <Button onClick={() => setStep('mode')} variant="outline" className="text-[#003441] border-[#003441]">
+              Back to Mode Selection
+            </Button>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  // Visual Language Selection
   return (
     <main className="min-h-screen bg-[#fcf9f8] flex flex-col items-center justify-center p-6 md:p-12 pb-24 relative">
-      
       <div className="w-full max-w-[800px] text-center mb-12 mt-8">
         <h1 className="font-heading text-5xl md:text-6xl text-[#003441] tracking-tight font-bold mb-4">
           Choose Your Language
@@ -244,24 +321,9 @@ export default function LanguageSelectionPage() {
           </div>
         </div>
 
-        {/* Big No Touch Mode Button */}
-        <div className="w-full pt-12 mt-12 border-t border-slate-200 flex flex-col items-center">
-          <p className="text-xl md:text-2xl font-medium text-muted-foreground mb-6 text-center">
-            Or, if you prefer to navigate entirely with your voice:
-          </p>
-          <Button 
-            onClick={() => {
-              setInteractionMode('voice');
-              router.push('/home');
-            }}
-            className="w-full max-w-[600px] h-[120px] rounded-3xl bg-[#003441] text-white flex flex-col items-center justify-center shadow-xl hover:scale-105 transition-transform group"
-          >
-            <span className="text-4xl md:text-5xl font-bold mb-2">
-              Start No Touch Mode
-            </span>
-            <span className="text-xl opacity-80 font-medium">
-              We will guide you by voice
-            </span>
+        <div className="pt-12">
+          <Button onClick={() => setStep('mode')} variant="ghost" className="text-muted-foreground hover:text-[#003441]">
+            Go Back
           </Button>
         </div>
 

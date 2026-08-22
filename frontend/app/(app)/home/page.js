@@ -17,7 +17,12 @@ export default function HomePage() {
 
   return (
     <main className="min-h-screen bg-background pb-[250px] flex flex-col items-center justify-center p-4">
-      <div className="max-w-[800px] w-full text-center space-y-8">
+      <div className="max-w-[800px] w-full text-center space-y-8 flex flex-col items-center">
+        <img 
+          src="/logo.png" 
+          alt="Parallax Logo" 
+          className="w-20 h-20 md:w-24 md:h-24 object-contain rounded-2xl shadow-md border border-slate-100 p-2 bg-white"
+        />
         <h1 className="font-heading text-5xl md:text-6xl text-primary tracking-tight font-bold">
           Welcome to Parallax
         </h1>
