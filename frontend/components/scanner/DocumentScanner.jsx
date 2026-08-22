@@ -18,7 +18,7 @@ export default function DocumentScanner({ expectedDocumentType = "income_certifi
   const [cvLoaded, setCvLoaded] = useState(false);
   const [guidanceText, setGuidanceText] = useState("Let's scan your document. Please wait while we initialize the camera.");
   
-  const { speak, playSystemAudio } = useVoice();
+  const { speak, playSystemAudio, playScannerAudio } = useVoice();
   const [verificationResult, setVerificationResult] = useState(null);
   const [capturedImage, setCapturedImage] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -37,6 +37,8 @@ export default function DocumentScanner({ expectedDocumentType = "income_certifi
   const lastProcessTime = useRef(0);
   const targetFPS = 20;
   const fpsInterval = 1000 / targetFPS;
+  // Critical: use a ref to track state inside the rAF loop to avoid stale closures
+  const scannerStateRef = useRef(SCANNER_STATES.INITIALIZING_CAMERA);
 
   // 1. Camera Lifecycle
   useEffect(() => {
@@ -46,16 +48,20 @@ export default function DocumentScanner({ expectedDocumentType = "income_certifi
     };
   }, [startCamera, stopCamera]);
 
-  // 2. OpenCV & OCR Lifecycle
+  // 2. OpenCV & OCR Lifecycle: when OpenCV finishes loading, start the scanner loop
   useEffect(() => {
     if (cvLoaded) {
+      scannerStateRef.current = SCANNER_STATES.SEARCHING;
       setScannerState(SCANNER_STATES.SEARCHING);
       setGuidanceText("Find the document. Point your camera at it.");
-      ocrRef.current.init("eng"); // Pre-load OCR worker
+      ocrRef.current.init("eng");
+      // Restart the rAF loop now that the detector is ready
+      if (requestRef.current) cancelAnimationFrame(requestRef.current);
+      requestRef.current = requestAnimationFrame(processFrame);
     }
 
     return () => {
-      if (requestRef.current) cancelAnimationFrame(requestRef.current);
+      // Only clean up OCR/detector, NOT the rAF loop (that's the mount effect's job)
       if (ocrRef.current) ocrRef.current.terminate();
       if (detectorRef.current) detectorRef.current.cleanup();
     };
@@ -88,23 +94,42 @@ export default function DocumentScanner({ expectedDocumentType = "income_certifi
     if (text === "Hold still.") {
         if ("vibrate" in navigator) navigator.vibrate(200);
     }
-    speak(text);
+    playScannerAudio(text);
   };
 
+  const ACTIVE_STATES = new Set([SCANNER_STATES.SEARCHING, SCANNER_STATES.DOCUMENT_DETECTED]);
+  const DONE_STATES = new Set([SCANNER_STATES.CAPTURING, SCANNER_STATES.PROCESSING, SCANNER_STATES.VERIFYING, SCANNER_STATES.RESULT]);
+
   const processFrame = () => {
-    if (!videoRef.current || !canvasRef.current || !detectorRef.current || scannerState === SCANNER_STATES.INITIALIZING_CAMERA) {
+    // Read from ref, NOT from state — state is stale inside rAF closures
+    const currentState = scannerStateRef.current;
+
+    // Gate 1: essential refs not ready yet
+    if (!videoRef.current || !canvasRef.current || !detectorRef.current) {
       requestRef.current = requestAnimationFrame(processFrame);
       return;
     }
 
-    if (scannerState >= SCANNER_STATES.CAPTURING) {
-      return; // Stop processing geometry
+    // Gate 2: camera not streaming yet
+    if (videoRef.current.readyState < 2 || videoRef.current.videoWidth === 0) {
+      requestRef.current = requestAnimationFrame(processFrame);
+      return;
+    }
+
+    // Gate 3: OpenCV not initialised yet
+    if (currentState === SCANNER_STATES.INITIALIZING_CAMERA) {
+      requestRef.current = requestAnimationFrame(processFrame);
+      return;
+    }
+
+    // Gate 4: capture already triggered — stop loop
+    if (DONE_STATES.has(currentState)) {
+      return;
     }
 
     const now = performance.now();
     const elapsed = now - lastProcessTime.current;
     
-    // Throttle to target FPS
     if (elapsed < fpsInterval) {
       requestRef.current = requestAnimationFrame(processFrame);
       return;
@@ -112,27 +137,41 @@ export default function DocumentScanner({ expectedDocumentType = "income_certifi
     
     lastProcessTime.current = now;
 
-    const geometry = detectorRef.current.detect(videoRef.current, canvasRef.current);
-    
-    // Log CV processing outputs for debugging
-    console.log("[CV Output Geometry]", geometry);
-
-    drawOverlay(geometry);
-
-    const guidance = guidanceRef.current.process(geometry, speakInstruction);
-    
-    if (guidance.currentInstruction && guidance.currentInstruction !== guidanceText) {
-      setGuidanceText(guidance.currentInstruction);
+    let geometry = null;
+    try {
+      geometry = detectorRef.current.detect(videoRef.current, canvasRef.current);
+    } catch(e) {
+      console.error('[Scanner] detect() threw:', e);
     }
 
-    if (geometry && scannerState === SCANNER_STATES.SEARCHING) {
+    console.log('[Scanner] state:', currentState, '| geometry:', geometry ? 'FOUND' : 'null',
+      '| video:', videoRef.current.videoWidth + 'x' + videoRef.current.videoHeight);
+    
+    drawOverlay(geometry);
+
+    const guidance = guidanceRef.current.process(geometry, null); // don't speak every frame
+    
+    if (guidance.currentInstruction) {
+      setGuidanceText(prev => {
+        // Only call TTS when the instruction text actually changes
+        if (prev !== guidance.currentInstruction) {
+          speakInstruction(guidance.currentInstruction);
+        }
+        return guidance.currentInstruction;
+      });
+    }
+
+    if (geometry && currentState === SCANNER_STATES.SEARCHING) {
+      scannerStateRef.current = SCANNER_STATES.DOCUMENT_DETECTED;
       setScannerState(SCANNER_STATES.DOCUMENT_DETECTED);
-    } else if (!geometry && scannerState !== SCANNER_STATES.SEARCHING) {
+    } else if (!geometry && currentState === SCANNER_STATES.DOCUMENT_DETECTED) {
+      scannerStateRef.current = SCANNER_STATES.SEARCHING;
       setScannerState(SCANNER_STATES.SEARCHING);
     }
 
-    if (guidance.isStable && scannerState !== SCANNER_STATES.CAPTURING && !hasTriggeredCapture.current) {
+    if (guidance.isStable && !DONE_STATES.has(currentState) && !hasTriggeredCapture.current) {
       hasTriggeredCapture.current = true;
+      scannerStateRef.current = SCANNER_STATES.CAPTURING;
       setScannerState(SCANNER_STATES.CAPTURING);
       setGuidanceText("Document captured. Processing...");
       speakInstruction("Document captured.");
@@ -142,12 +181,12 @@ export default function DocumentScanner({ expectedDocumentType = "income_certifi
     }
   };
 
+  // Start the rAF loop once. The loop itself reads scannerStateRef to know what to do.
   useEffect(() => {
-    if (scannerState === SCANNER_STATES.SEARCHING || scannerState === SCANNER_STATES.DOCUMENT_DETECTED) {
-      requestRef.current = requestAnimationFrame(processFrame);
-    }
+    requestRef.current = requestAnimationFrame(processFrame);
     return () => cancelAnimationFrame(requestRef.current);
-  }, [scannerState]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Run once on mount only
 
   const drawOverlay = (geometry) => {
     if (!overlayCanvasRef.current || !videoRef.current) return;
@@ -266,7 +305,8 @@ export default function DocumentScanner({ expectedDocumentType = "income_certifi
         onReady={handleCvLoaded} 
         strategy="lazyOnload"
       />
-      <canvas ref={canvasRef} className="hidden" />
+      {/* Processing canvas - must NOT be display:none or drawImage returns blank pixels */}
+      <canvas ref={canvasRef} style={{ position: 'absolute', opacity: 0, pointerEvents: 'none', top: 0, left: 0, width: 1, height: 1 }} />
       
       <div className="p-4 bg-card flex justify-between items-center shadow-sm z-20 relative">
         <h2 className="text-xl font-heading font-bold text-primary">Document Scanner</h2>

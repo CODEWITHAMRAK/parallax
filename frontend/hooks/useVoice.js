@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { useState, useCallback } from 'react';
 import { voiceService } from '../lib/voiceService';
 import useLocalizationStore from '../store/useLocalizationStore';
+import useNavigationStore from '../store/useNavigationStore';
 
 export const VoiceState = {
   IDLE: 'idle',
@@ -92,6 +93,45 @@ export function useVoice() {
     voiceService.stopSpeaking();
   }, []);
 
+  const playScannerAudio = useCallback((text) => {
+    const textToKey = {
+      "Document lost. Find the document.": "document_lost",
+      "Move slightly left.": "move_left",
+      "Move slightly right.": "move_right",
+      "Move slightly up.": "move_up",
+      "Move slightly down.": "move_down",
+      "Move closer.": "move_closer",
+      "Move slightly back.": "move_back",
+      "Tilt your phone slightly.": "tilt_phone",
+      "Hold still.": "hold_still",
+      "Document captured.": "document_captured",
+      "Verifying document readability...": "verifying_document",
+      "This looks good. Would you like to use this document?": "looks_good",
+      "Please try again.": "try_again",
+      "Saving document...": "saving_document",
+      "Upload failed. Please try again.": "upload_failed"
+    };
+
+    const langMap = {
+      'English': 'en-IN',
+      'Hindi': 'hi-IN',
+      'Kannada': 'kn-IN'
+    };
+
+    const key = textToKey[text];
+    if (!key) {
+      speak(text); // fallback
+      return;
+    }
+
+    const currentLang = useNavigationStore.getState().language;
+    const langCode = langMap[currentLang] || 'en-IN';
+    const audioUrl = `/audio/scanner/${langCode}/${key}.wav`;
+
+    const audio = new Audio(audioUrl);
+    audio.play().catch(e => console.error("Error playing precomputed audio:", e));
+  }, [speak]);
+
   return {
     state,
     transcribedText,
@@ -100,6 +140,7 @@ export function useVoice() {
     pauseListening, // renamed from stopListeningAndTranscribe as it no longer fetches manually
     speak,
     playSystemAudio,
+    playScannerAudio,
     stopSpeaking,
     interactionMode,
     setInteractionMode

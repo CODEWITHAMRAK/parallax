@@ -1,17 +1,23 @@
 export class DocumentDetector {
   constructor(cv) {
     this.cv = cv;
-    this.processWidth = 640; // Increased resolution for much better edge detection
+    this.processWidth = 640;
     this.processHeight = 0; 
     
-    // We only pre-allocate the source matrix to avoid copying image data heavily
     this.src = new cv.Mat();
     this.gray = new cv.Mat();
     this.blur = new cv.Mat();
     this.edges = new cv.Mat();
+    this.hull = new cv.Mat();
     this.approx = new cv.Mat();
     this.bestApprox = new cv.Mat();
     this.ksize = new cv.Size(5, 5);
+
+    // Temporal smoothing: keep a small ring buffer of recent detections
+    // to avoid flickering when the contour is borderline.
+    this.historySize = 5;
+    this.geometryHistory = [];
+    this.lastGoodGeometry = null;
   }
 
   // Add cleanup method to be called on unmount
@@ -25,6 +31,7 @@ export class DocumentDetector {
     safeDelete(this.gray);
     safeDelete(this.blur);
     safeDelete(this.edges);
+    safeDelete(this.hull); // ADDED HULL
     safeDelete(this.approx);
     safeDelete(this.bestApprox);
   }
@@ -84,42 +91,45 @@ export class DocumentDetector {
 
       let maxArea = 0;
       const minArea = (this.processWidth * this.processHeight) * 0.05;
-      let bestCorners = null;
+      let bestApprox = null; // local per-frame, not reused
 
       for (let i = 0; i < contours.size(); ++i) {
         let cnt = contours.get(i);
         let area = this.cv.contourArea(cnt);
 
         if (area > minArea && area > maxArea) {
-          let rect = this.cv.minAreaRect(cnt);
-          let rectArea = rect.size.width * rect.size.height;
-          
-          // Ensure the contour actually fills most of its bounding box (filters out hands/wires)
-          if (rectArea > 0 && (area / rectArea) > 0.4) {
-            maxArea = area;
-            
-            // Manually calculate 4 corners of the RotatedRect (cv.RotatedRect.points is missing in JS bindings)
-            let cx = rect.center.x;
-            let cy = rect.center.y;
-            let w = rect.size.width / 2;
-            let h = rect.size.height / 2;
-            let angle = (rect.angle * Math.PI) / 180.0;
-            let cosA = Math.cos(angle);
-            let sinA = Math.sin(angle);
+          // Stretch a "rubber band" around the contour to ignore torn edges
+          let hull = new this.cv.Mat();
+          this.cv.convexHull(cnt, hull, false, true);
 
-            bestCorners = [
-              { x: cx + (-w)*cosA - (-h)*sinA, y: cy + (-w)*sinA + (-h)*cosA },
-              { x: cx + (w)*cosA - (-h)*sinA,  y: cy + (w)*sinA + (-h)*cosA },
-              { x: cx + (w)*cosA - (h)*sinA,   y: cy + (w)*sinA + (h)*cosA },
-              { x: cx + (-w)*cosA - (h)*sinA,  y: cy + (-w)*sinA + (h)*cosA }
-            ];
+          // Approximate the convex hull to a polygon
+          let approx = new this.cv.Mat();
+          let peri = this.cv.arcLength(hull, true);
+          this.cv.approxPolyDP(hull, approx, 0.05 * peri, true);
+
+          hull.delete(); // hull no longer needed
+
+          if (approx.rows === 4) {
+            maxArea = area;
+            if (bestApprox) bestApprox.delete(); // free previous best
+            bestApprox = approx; // take ownership
+          } else {
+            approx.delete();
           }
         }
         cnt.delete();
       }
 
-      if (bestCorners) {
-        const corners = bestCorners;
+      if (bestApprox && bestApprox.rows === 4) {
+        // Extract corners from the 4-row approx mat
+        const corners = [];
+        for (let i = 0; i < 4; i++) {
+          corners.push({
+            x: bestApprox.data32S[i * 2],
+            y: bestApprox.data32S[i * 2 + 1]
+          });
+        }
+        bestApprox.delete();
         
         const center = corners.reduce((acc, val) => ({ x: acc.x + val.x, y: acc.y + val.y }), { x: 0, y: 0 });
         center.x /= 4;
@@ -142,10 +152,31 @@ export class DocumentDetector {
         };
       }
 
+      // --- Temporal smoothing ---
+      // Push raw result into history buffer
+      this.geometryHistory.push(result !== null);
+      if (this.geometryHistory.length > this.historySize) {
+        this.geometryHistory.shift();
+      }
+
+      // Count how many of the last N frames had a positive detection
+      const positives = this.geometryHistory.filter(Boolean).length;
+
+      if (result !== null) {
+        this.lastGoodGeometry = result; // Always keep the latest good geometry
+      }
+
+      // Only report detection if majority of recent frames were positive
+      // This stops the teal box from flickering
+      if (positives >= Math.ceil(this.historySize / 2)) {
+        return this.lastGoodGeometry;
+      }
+
+      return null;
+
     } catch (err) {
       console.error("OpenCV detection error:", err);
     } finally {
-      // GUARANTEED CLEANUP to prevent WASM memory leaks for frame-specific mats
       const safeDelete = (mat) => {
         if (mat && !mat.isDeleted) {
           try { mat.delete(); } catch(e) {}
@@ -155,6 +186,6 @@ export class DocumentDetector {
       safeDelete(hierarchy);
     }
 
-    return result;
+    return null;
   }
 }
