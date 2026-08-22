@@ -85,10 +85,7 @@ export class DocumentDetector {
       const kernel = mat(cv.Mat.ones(3, 3, cv.CV_8U));
       cv.dilate(edges, edges, kernel, new cv.Point(-1, -1), 1);
 
-      // Draw a 1-pixel border to close contours that touch the screen edge!
-      cv.rectangle(edges, new cv.Point(0, 0), new cv.Point(W - 1, H - 1), new cv.Scalar(255, 255, 255, 255), 1);
-
-      // ── 5. Find external contours ─────────────────────────────────
+      // ── 5. Find all contours ──────────────────────────────────────
       const contours  = mat(new cv.MatVector());
       const hierarchy = mat(new cv.Mat());
       cv.findContours(edges, contours, hierarchy,
@@ -98,56 +95,68 @@ export class DocumentDetector {
       const frameArea = W * H;
       const minArea   = frameArea * 0.03;
 
-      let maxArea     = 0;
+      let maxQuadArea = 0;
       let bestCorners = null;
+      
+      let maxBlobArea = 0;
       let fallbackRect = null;
 
       for (let i = 0; i < contours.size(); i++) {
-        const cnt     = contours.get(i);
-        const cntArea = cv.contourArea(cnt);
-        if (cntArea < minArea) { cnt.delete(); continue; }
-
-        const hull     = mat(new cv.Mat());
+        const cnt = contours.get(i);
+        
+        const hull = mat(new cv.Mat());
         cv.convexHull(cnt, hull, false, true);
         const hullArea = cv.contourArea(hull);
-        cnt.delete();
 
-        if (hullArea < minArea || hullArea > frameArea * 0.95) continue;
+        // We filter by hullArea so open U-shapes (partial documents) are allowed to pass!
+        if (hullArea < minArea || hullArea > frameArea * 0.95) { cnt.delete(); continue; }
+
+        const hullPeri = cv.arcLength(hull, true);
+        const cntPeri  = cv.arcLength(cnt, true); // true here handles U-shapes robustly
         
-        // Solidity check: A real document is mostly a solid rectangle.
-        // If the contour area is much smaller than its convex hull, it's a jagged blob (like a bedsheet).
-        const solidity = cntArea / hullArea;
-        if (solidity < 0.85) continue;
+        // Complexity check: A clean document (or partial document) has a simple contour.
+        // A messy background web (bedsheet) will have a massive perimeter compared to its hull.
+        if (cntPeri > hullPeri * 1.5) { cnt.delete(); continue; }
 
-        if (hullArea <= maxArea) continue;
-
-        maxArea      = hullArea;
-        fallbackRect = cv.boundingRect(hull);
-
-        // Approximate to quadrilateral with increasing epsilon
-        const peri   = cv.arcLength(hull, true);
+        // Approximate the hull to a quadrilateral
         const approx = mat(new cv.Mat());
-        let found4   = false;
+        let found4 = false;
+        let corners = null;
 
-        // Tighter epsilon (0.02 - 0.08) because solidity check handles the junk
         for (let eps = 0.02; eps <= 0.08; eps += 0.01) {
-          cv.approxPolyDP(hull, approx, eps * peri, true);
-          if (approx.rows === 4) { found4 = true; break; }
+          cv.approxPolyDP(hull, approx, eps * hullPeri, true);
+          if (approx.rows === 4) { 
+             found4 = true; 
+             corners = [];
+             for (let j = 0; j < 4; j++) {
+               corners.push({
+                 x: Math.max(0, Math.min(W - 1, approx.data32S[j * 2])),
+                 y: Math.max(0, Math.min(H - 1, approx.data32S[j * 2 + 1])),
+               });
+             }
+             break; 
+          }
         }
 
         if (found4) {
-          const corners = [];
-          for (let j = 0; j < 4; j++) {
-            corners.push({
-              x: Math.max(0, Math.min(W - 1, approx.data32S[j * 2])),
-              y: Math.max(0, Math.min(H - 1, approx.data32S[j * 2 + 1])),
-            });
+          // Valid quad (document or partial document) ALWAYS wins if it's the largest quad
+          if (hullArea > maxQuadArea) {
+             maxQuadArea = hullArea;
+             bestCorners = corners;
           }
-          bestCorners = corners;
+        } else {
+          // Not a quad, but could be a valid fallback blob
+          if (hullArea > maxBlobArea) {
+             maxBlobArea = hullArea;
+             fallbackRect = cv.boundingRect(hull);
+          }
         }
+        
+        cnt.delete();
       }
 
       // ── 7. Build result ───────────────────────────────────────────
+      // A valid quad always wins over a blob, even if the blob is larger.
       if (bestCorners) {
         result = this._buildResult(bestCorners, W, H);
       } else if (fallbackRect) {
