@@ -1,0 +1,338 @@
+"use client";
+
+import React, { useEffect, useState, useRef } from "react";
+import { useCamera } from "../../hooks/useCamera";
+import { SCANNER_STATES } from "../../lib/scanner/ScannerState";
+import { DocumentDetector } from "../../lib/scanner/DocumentDetector";
+import { GuidanceEngine } from "../../lib/scanner/GuidanceEngine";
+import { ImageProcessor } from "../../lib/scanner/ImageProcessor";
+import { OCRService } from "../../lib/scanner/OCRService";
+import { DocumentVerifier } from "../../lib/scanner/DocumentVerifier";
+import { Button } from "../ui/button";
+import Script from "next/script";
+import { useVoice } from "../../hooks/useVoice";
+
+export default function DocumentScanner({ expectedDocumentType = "income_certificate", onCancel, onConfirm }) {
+  const { videoRef, startCamera, stopCamera, error } = useCamera();
+  const [scannerState, setScannerState] = useState(SCANNER_STATES.INITIALIZING_CAMERA);
+  const [cvLoaded, setCvLoaded] = useState(false);
+  const [guidanceText, setGuidanceText] = useState("Let's scan your document. Please wait while we initialize the camera.");
+  
+  const { speak, playSystemAudio } = useVoice();
+  const [verificationResult, setVerificationResult] = useState(null);
+  const [capturedImage, setCapturedImage] = useState(null);
+  const [isUploading, setIsUploading] = useState(false);
+
+  const canvasRef = useRef(null);
+  const overlayCanvasRef = useRef(null);
+  
+  const detectorRef = useRef(null);
+  const guidanceRef = useRef(new GuidanceEngine());
+  const processorRef = useRef(null);
+  const ocrRef = useRef(new OCRService());
+  const verifierRef = useRef(new DocumentVerifier());
+  const requestRef = useRef();
+  
+  const hasTriggeredCapture = useRef(false);
+  const lastProcessTime = useRef(0);
+  const targetFPS = 20;
+  const fpsInterval = 1000 / targetFPS;
+
+  // 1. Camera Lifecycle
+  useEffect(() => {
+    startCamera();
+    return () => {
+      stopCamera();
+    };
+  }, [startCamera, stopCamera]);
+
+  // 2. OpenCV & OCR Lifecycle
+  useEffect(() => {
+    if (cvLoaded) {
+      setScannerState(SCANNER_STATES.SEARCHING);
+      setGuidanceText("Find the document. Point your camera at it.");
+      ocrRef.current.init("eng"); // Pre-load OCR worker
+    }
+
+    return () => {
+      if (requestRef.current) cancelAnimationFrame(requestRef.current);
+      if (ocrRef.current) ocrRef.current.terminate();
+      if (detectorRef.current) detectorRef.current.cleanup();
+    };
+  }, [cvLoaded]);
+
+  const handleCvLoaded = () => {
+    console.log("OpenCV script loaded, waiting for WASM runtime...");
+    
+    const checkCvReady = setInterval(() => {
+      if (window.cv && window.cv.Mat) {
+        try {
+          // Test if Mat is a constructor yet (WASM loaded)
+          const m = new window.cv.Mat();
+          m.delete();
+          
+          clearInterval(checkCvReady);
+          console.log("OpenCV WASM runtime initialized.");
+          console.count("DocumentDetector CREATED");
+          detectorRef.current = new DocumentDetector(window.cv);
+          processorRef.current = new ImageProcessor(window.cv);
+          setCvLoaded(true);
+        } catch (e) {
+          // Still loading
+        }
+      }
+    }, 100);
+  };
+
+  const speakInstruction = (text) => {
+    if (text === "Hold still.") {
+        if ("vibrate" in navigator) navigator.vibrate(200);
+    }
+    speak(text);
+  };
+
+  const processFrame = () => {
+    if (!videoRef.current || !canvasRef.current || !detectorRef.current || scannerState === SCANNER_STATES.INITIALIZING_CAMERA) {
+      requestRef.current = requestAnimationFrame(processFrame);
+      return;
+    }
+
+    if (scannerState >= SCANNER_STATES.CAPTURING) {
+      return; // Stop processing geometry
+    }
+
+    const now = performance.now();
+    const elapsed = now - lastProcessTime.current;
+    
+    // Throttle to target FPS
+    if (elapsed < fpsInterval) {
+      requestRef.current = requestAnimationFrame(processFrame);
+      return;
+    }
+    
+    lastProcessTime.current = now;
+
+    const geometry = detectorRef.current.detect(videoRef.current, canvasRef.current);
+    
+    // Log CV processing outputs for debugging
+    console.log("[CV Output Geometry]", geometry);
+
+    drawOverlay(geometry);
+
+    const guidance = guidanceRef.current.process(geometry, speakInstruction);
+    
+    if (guidance.currentInstruction && guidance.currentInstruction !== guidanceText) {
+      setGuidanceText(guidance.currentInstruction);
+    }
+
+    if (geometry && scannerState === SCANNER_STATES.SEARCHING) {
+      setScannerState(SCANNER_STATES.DOCUMENT_DETECTED);
+    } else if (!geometry && scannerState !== SCANNER_STATES.SEARCHING) {
+      setScannerState(SCANNER_STATES.SEARCHING);
+    }
+
+    if (guidance.isStable && scannerState !== SCANNER_STATES.CAPTURING && !hasTriggeredCapture.current) {
+      hasTriggeredCapture.current = true;
+      setScannerState(SCANNER_STATES.CAPTURING);
+      setGuidanceText("Document captured. Processing...");
+      speakInstruction("Document captured.");
+      handleCapture(geometry);
+    } else {
+      requestRef.current = requestAnimationFrame(processFrame);
+    }
+  };
+
+  useEffect(() => {
+    if (scannerState === SCANNER_STATES.SEARCHING || scannerState === SCANNER_STATES.DOCUMENT_DETECTED) {
+      requestRef.current = requestAnimationFrame(processFrame);
+    }
+    return () => cancelAnimationFrame(requestRef.current);
+  }, [scannerState]);
+
+  const drawOverlay = (geometry) => {
+    if (!overlayCanvasRef.current || !videoRef.current) return;
+    const ctx = overlayCanvasRef.current.getContext('2d');
+    const width = overlayCanvasRef.current.width = videoRef.current.clientWidth;
+    const height = overlayCanvasRef.current.height = videoRef.current.clientHeight;
+
+    ctx.clearRect(0, 0, width, height);
+
+    if (geometry) {
+      // Handle object-fit: cover scaling
+      const videoRatio = videoRef.current.videoWidth / videoRef.current.videoHeight;
+      const containerRatio = width / height;
+      
+      let drawWidth, drawHeight, offsetX, offsetY;
+      
+      if (containerRatio > videoRatio) {
+        drawWidth = width;
+        drawHeight = width / videoRatio;
+        offsetX = 0;
+        offsetY = (height - drawHeight) / 2;
+      } else {
+        drawHeight = height;
+        drawWidth = height * videoRatio;
+        offsetX = (width - drawWidth) / 2;
+        offsetY = 0;
+      }
+
+      const scaleX = drawWidth / geometry.processWidth;
+      const scaleY = drawHeight / geometry.processHeight;
+
+      ctx.beginPath();
+      ctx.moveTo(offsetX + geometry.corners[0].x * scaleX, offsetY + geometry.corners[0].y * scaleY);
+      for (let i = 1; i < 4; i++) {
+        ctx.lineTo(offsetX + geometry.corners[i].x * scaleX, offsetY + geometry.corners[i].y * scaleY);
+      }
+      ctx.closePath();
+      
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = '#00e5ff';
+      ctx.fillStyle = 'rgba(0, 229, 255, 0.1)';
+      ctx.stroke();
+      ctx.fill();
+    }
+  };
+
+  const handleCapture = async (geometry) => {
+    setScannerState(SCANNER_STATES.PROCESSING);
+    
+    // 1. Perspective Transform & Quality Check
+    const processed = processorRef.current.process(videoRef.current, geometry);
+    if (!processed) {
+      handleRetry("Failed to process image.");
+      return;
+    }
+    
+    setCapturedImage(processed.dataUrl);
+    setScannerState(SCANNER_STATES.VERIFYING);
+    setGuidanceText("Verifying document...");
+    speakInstruction("Verifying document readability...");
+
+    try {
+      // 2. OCR
+      const ocrData = await ocrRef.current.recognize(processed.dataUrl);
+      
+      // 3. Verification
+      const result = verifierRef.current.verify(ocrData, processed.quality, expectedDocumentType);
+      setVerificationResult(result);
+      setScannerState(SCANNER_STATES.RESULT);
+
+      if (result.documentMatch && result.readable) {
+        speakInstruction("This looks good. Would you like to use this document?");
+      } else {
+        speakInstruction(result.reason || "Please try again.");
+      }
+
+    } catch (err) {
+      console.error(err);
+      handleRetry("Verification failed.");
+    }
+  };
+
+  const handleRetry = (msg) => {
+    if (msg) speakInstruction(msg);
+    hasTriggeredCapture.current = false;
+    setCapturedImage(null);
+    setVerificationResult(null);
+    setScannerState(SCANNER_STATES.SEARCHING);
+    setGuidanceText("Find the document. Point your camera at it.");
+  };
+
+  const handleAccept = async () => {
+    setIsUploading(true);
+    speakInstruction("Saving document...");
+    try {
+      const response = await fetch('http://localhost:8080/api/upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileDataUrl: capturedImage })
+      });
+      if (!response.ok) throw new Error("Upload failed");
+      const data = await response.json();
+      
+      if (onConfirm) onConfirm(data.url);
+    } catch (err) {
+      console.error(err);
+      speakInstruction("Upload failed. Please try again.");
+      setIsUploading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-background flex flex-col">
+      <Script 
+        src="https://docs.opencv.org/4.8.0/opencv.js" 
+        onReady={handleCvLoaded} 
+        strategy="lazyOnload"
+      />
+      <canvas ref={canvasRef} className="hidden" />
+      
+      <div className="p-4 bg-card flex justify-between items-center shadow-sm z-20 relative">
+        <h2 className="text-xl font-heading font-bold text-primary">Document Scanner</h2>
+        <Button variant="outline" onClick={onCancel} disabled={isUploading}>Cancel</Button>
+      </div>
+
+      <div className="relative flex-1 bg-black overflow-hidden flex flex-col items-center justify-center">
+        {error ? (
+          <div className="text-destructive p-4 text-center bg-card rounded-lg m-4 z-20 relative">
+            <p className="font-bold text-xl mb-2">Camera Error</p>
+            <p>{error}</p>
+          </div>
+        ) : scannerState === SCANNER_STATES.RESULT && verificationResult ? (
+          <div className="z-20 flex flex-col items-center justify-center h-full w-full bg-background p-6">
+            <div className="max-w-md w-full bg-card rounded-2xl shadow-xl overflow-hidden flex flex-col items-center text-center">
+              <img src={capturedImage} alt="Captured Document" className="w-full max-h-64 object-contain bg-muted" />
+              
+              <div className="p-6 w-full">
+                {verificationResult.documentMatch && verificationResult.readable ? (
+                  <>
+                    <h3 className="text-2xl font-bold text-green-600 mb-2">✓ Verified</h3>
+                    <p className="text-lg text-foreground mb-6">Appears to be correct and readable.</p>
+                    <div className="flex flex-col gap-4">
+                      <Button size="lg" onClick={handleAccept} disabled={isUploading} className="w-full text-lg h-14">
+                        {isUploading ? "Uploading..." : "Use this document"}
+                      </Button>
+                      <Button size="lg" variant="outline" onClick={() => handleRetry()} disabled={isUploading} className="w-full text-lg h-14">
+                        Scan Again
+                      </Button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <h3 className="text-2xl font-bold text-destructive mb-2">✗ Verification Failed</h3>
+                    <p className="text-lg text-foreground mb-6">{verificationResult.reason}</p>
+                    <Button size="lg" onClick={() => handleRetry()} className="w-full text-lg h-14">
+                      Try Again
+                    </Button>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <>
+            <video 
+              ref={videoRef} 
+              autoPlay 
+              playsInline 
+              muted 
+              style={{ filter: 'brightness(1.3) contrast(1.1)' }}
+              className={`absolute inset-0 w-full h-full object-cover transition-opacity opacity-100`}
+            />
+            <canvas 
+              ref={overlayCanvasRef}
+              className={`absolute inset-0 w-full h-full pointer-events-none transition-opacity ${scannerState >= SCANNER_STATES.CAPTURING ? 'opacity-0' : 'opacity-100'}`}
+            />
+            
+            <div className="absolute bottom-12 left-4 right-4 text-center pointer-events-none z-30">
+              <div className="bg-primary/95 text-primary-foreground px-6 py-4 rounded-2xl shadow-2xl inline-block max-w-[90%] mx-auto backdrop-blur-sm border-2 border-primary-foreground/20">
+                <p className="text-2xl font-bold font-heading leading-tight">{guidanceText}</p>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}

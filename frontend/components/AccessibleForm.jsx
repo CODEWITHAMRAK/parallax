@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect } from "react";
+import React, { useEffect, useState} from "react";
 import useFormStore from "../store/useFormStore.js";
 import useNavigationStore from "../store/useNavigationStore.js";
 import { Button } from "./ui/button.jsx";
@@ -9,12 +9,14 @@ import { useRouter } from "next/navigation";
 import { ACTIONS } from "../lib/navigation.js";
 import { fetchChatAction, getDraft, saveDraft } from "../lib/apiService.js";
 import { useVoice } from "../hooks/useVoice.js";
+import DocumentScanner from "./scanner/DocumentScanner.jsx";
 
 export default function AccessibleForm({ formId }) {
   const { schema, values, completed, loadSchema, loadingSchema, error, draftLoaded } = useFormStore();
   const { currentStepIndex, currentFieldId, stepHistory, setSystemMessage } = useNavigationStore();
   const router = useRouter();
   const { speak } = useVoice();
+  const [activeScannerField, setActiveScannerField] = useState(null);
 
   useEffect(() => {
     const initForm = async () => {
@@ -104,6 +106,13 @@ export default function AccessibleForm({ formId }) {
   const handleNext = () => executeAction({ action: ACTIONS.NEXT }, router);
   const handlePrev = () => executeAction({ action: ACTIONS.PREVIOUS }, router);
 
+  const handleScannerConfirm = (url) => {
+    if (activeScannerField) {
+      useFormStore.getState().updateValue(activeScannerField.id, url, true);
+    }
+    setActiveScannerField(null);
+  };
+
   return (
     <div className="w-full max-w-[800px] mx-auto p-4 md:p-8 bg-card rounded-2xl shadow-[0_4px_20px_rgba(0,52,65,0.15)] min-h-[500px] flex flex-col justify-between">
       <div>
@@ -140,6 +149,15 @@ export default function AccessibleForm({ formId }) {
                       <option key={opt} value={opt}>{opt}</option>
                     ))}
                   </select>
+                ) : field.type === 'file' ? (
+                  <div className="flex gap-4">
+                    <Button 
+                      onClick={() => setActiveScannerField(field)}
+                      className={`h-[64px] flex-1 text-xl font-bold rounded-lg transition-all ${values[field.id] ? "bg-green-600 hover:bg-green-700 text-white" : "bg-primary hover:bg-primary/90 text-primary-foreground"}`}
+                    >
+                      {values[field.id] ? "✓ Document Uploaded (Tap to Scan Again)" : "📷 Scan Document"}
+                    </Button>
+                  </div>
                 ) : (
                   <input
                     id={field.id}
@@ -177,6 +195,14 @@ export default function AccessibleForm({ formId }) {
           {currentStepIndex === schema.steps.length - 1 ? 'Review & Submit' : 'Next Step'}
         </Button>
       </div>
+
+      {activeScannerField && (
+        <DocumentScanner 
+          expectedDocumentType={activeScannerField.id}
+          onCancel={() => setActiveScannerField(null)}
+          onConfirm={handleScannerConfirm}
+        />
+      )}
     </div>
   );
 }

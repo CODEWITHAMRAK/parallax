@@ -10,6 +10,7 @@ import schemaRoutes from "./routes/schemaRoutes.js";
 import draftRoutes from "./routes/draftRoutes.js";
 import voiceRoutes from "./routes/voiceRoutes.js";
 import localizationRoutes from "./routes/localizationRoutes.js";
+import uploadRoutes from "./routes/uploadRoutes.js";
 dotenv.config();
 
 const app = express();
@@ -36,6 +37,7 @@ app.use("/api/schemas", schemaRoutes);
 app.use("/api/drafts", draftRoutes);
 app.use("/api/voice", voiceRoutes);
 app.use("/api/localization", localizationRoutes);
+app.use("/api/upload", uploadRoutes);
 app.get("/", (req, res) => {
     res.send("Hello World!");
 });
