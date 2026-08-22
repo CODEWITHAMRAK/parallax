@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
+import { getSarvamApiKey } from '../utils/sarvamKeys.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -9,11 +10,7 @@ const __dirname = path.dirname(__filename);
 // Load .env from backend root
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
 
-const apiKey = process.env.SARVAM_API_KEY;
-if (!apiKey) {
-  console.error("SARVAM_API_KEY is missing from .env");
-  process.exit(1);
-}
+
 
 // 10 Indic Languages + English supported by Sarvam Translate
 const languages = [
@@ -35,7 +32,7 @@ async function translateText(text, targetLang) {
   const response = await fetch("https://api.sarvam.ai/translate", {
     method: "POST",
     headers: {
-      "api-subscription-key": apiKey,
+      "api-subscription-key": getSarvamApiKey(),
       "Content-Type": "application/json"
     },
     body: JSON.stringify({
@@ -72,7 +69,7 @@ async function generateSpeech(text, targetLang) {
   const response = await fetch("https://api.sarvam.ai/text-to-speech", {
     method: "POST",
     headers: {
-      "api-subscription-key": apiKey,
+      "api-subscription-key": getSarvamApiKey(),
       "Content-Type": "application/json"
     },
     body: JSON.stringify(payload)
