@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { apiFetch } from '../lib/api.js';
 
 // Fallback basic English dictionary
 const fallbackDictionary = {
@@ -38,7 +39,7 @@ const useLocalizationStore = create((set, get) => ({
     
     set({ loading: true });
     try {
-      const res = await fetch(`http://localhost:8080/api/localization/${encodeURIComponent(lang)}`);
+      const res = await apiFetch(`/api/localization/${encodeURIComponent(lang)}`);
       const data = await res.json();
       if (data.success && data.data) {
         set({ dictionary: data.data, loading: false });

@@ -38,7 +38,7 @@ export default function AccessibleForm({ formId }) {
     const { currentStepIndex, currentFieldId, stepHistory, setSystemMessage } =
         useNavigationStore();
     const router = useRouter();
-    const { speak } = useVoice();
+    const { speak, pauseListening } = useVoice();
 
     const [activeScannerTarget, setActiveScannerTarget] = useState(null); // 'autofill' or field object
     const [isProcessing, setIsProcessing] = useState(false);
@@ -99,6 +99,13 @@ export default function AccessibleForm({ formId }) {
         ) {
             fetchingRef.current = true;
             setSystemMessage("", true);
+            
+            // Pause mic while fetching auto-greeting for the new step
+            const currentMode = document.getElementById("interaction-mode-indicator")?.dataset?.mode;
+            if (currentMode === "voice") {
+                pauseListening(false);
+            }
+
             const fetchGreeting = async () => {
                 try {
                     const currentStep = schema.steps[currentStepIndex];
@@ -123,31 +130,29 @@ export default function AccessibleForm({ formId }) {
                     );
                     if (action.message) {
                         setSystemMessage(action.message);
-                        const currentMode = document.getElementById(
-                            "interaction-mode-indicator",
-                        )?.dataset?.mode;
                         if (currentMode === "voice") {
                             speak(action.message).then(() => {
-                                const modeAfter = document.getElementById(
-                                    "interaction-mode-indicator",
-                                )?.dataset?.mode;
+                                const modeAfter = document.getElementById("interaction-mode-indicator")?.dataset?.mode;
                                 if (modeAfter === "voice") {
-                                    window.dispatchEvent(
-                                        new Event("start-voice-turn"),
-                                    );
+                                    window.dispatchEvent(new Event("start-voice-turn"));
                                 }
                             });
                         }
+                    } else if (currentMode === "voice") {
+                        window.dispatchEvent(new Event("start-voice-turn"));
                     }
-                } catch (e) {
-                    console.error("Failed to auto-fetch greeting", e);
+                } catch (err) {
+                    console.error("Failed to fetch auto-greeting:", err);
+                    if (currentMode === "voice") {
+                        window.dispatchEvent(new Event("start-voice-turn"));
+                    }
                 } finally {
                     fetchingRef.current = false;
                 }
             };
             fetchGreeting();
         }
-    }, [currentStepIndex, schema, stepHistory, setSystemMessage, draftLoaded, speak]);
+    }, [currentStepIndex, schema, stepHistory, setSystemMessage, draftLoaded, speak, pauseListening]);
 
     // Handle custom events for scanning and picking files
     useEffect(() => {

@@ -230,6 +230,8 @@ export class VoiceController {
       const audioUrl = URL.createObjectURL(audioBlob);
 
       return new Promise((resolve, reject) => {
+        this.speakResolve = resolve;
+        this.speakReject = reject;
         this.audioElement = new Audio(audioUrl);
         this.audioElement.onplay = () => {
           if (onPlaybackStart) onPlaybackStart();
@@ -237,15 +239,27 @@ export class VoiceController {
         this.audioElement.onended = () => {
           URL.revokeObjectURL(audioUrl);
           this.isSpeaking = false;
-          resolve();
+          if (this.speakResolve) {
+            this.speakResolve();
+            this.speakResolve = null;
+            this.speakReject = null;
+          }
         };
         this.audioElement.onerror = (err) => {
           this.isSpeaking = false;
-          reject(err);
+          if (this.speakReject) {
+            this.speakReject(err);
+            this.speakResolve = null;
+            this.speakReject = null;
+          }
         };
         this.audioElement.play().catch((err) => {
           this.isSpeaking = false;
-          reject(err);
+          if (this.speakReject) {
+            this.speakReject(err);
+            this.speakResolve = null;
+            this.speakReject = null;
+          }
         });
       });
     } catch (e) {
@@ -265,12 +279,18 @@ export class VoiceController {
       this.isSpeaking = true;
       this.stopSpeaking();
       this.pauseListening(false);
+      this.speakResolve = resolve;
+      
       const audioSource = `/audio/system/${validLang}/${type}.wav`;
       this.audioElement = new Audio(audioSource);
 
       this.audioElement.onended = () => {
         this.isSpeaking = false;
-        resolve();
+        if (this.speakResolve) {
+          this.speakResolve();
+          this.speakResolve = null;
+          this.speakReject = null;
+        }
       };
 
       this.audioElement.onerror = (e) => {
@@ -294,21 +314,46 @@ export class VoiceController {
         }
 
         this.isSpeaking = false;
-        this.speak(fallbackText, validLang).then(resolve).catch(resolve);
+        this.speak(fallbackText, validLang).then(() => {
+          if (this.speakResolve) {
+            this.speakResolve();
+            this.speakResolve = null;
+            this.speakReject = null;
+          }
+        }).catch(() => {
+          if (this.speakResolve) {
+            this.speakResolve();
+            this.speakResolve = null;
+            this.speakReject = null;
+          }
+        });
       };
 
       this.audioElement.play().catch((err) => {
         console.warn("Autoplay was blocked or audio play failed:", err);
         this.isSpeaking = false;
-        resolve();
+        if (this.speakResolve) {
+          this.speakResolve();
+          this.speakResolve = null;
+          this.speakReject = null;
+        }
       });
     });
   }
 
   stopSpeaking() {
+    this.isSpeaking = false;
     if (this.audioElement) {
       this.audioElement.pause();
+      this.audioElement.onended = null;
+      this.audioElement.onerror = null;
+      this.audioElement.onplay = null;
       this.audioElement = null;
+    }
+    if (this.speakResolve) {
+      this.speakResolve();
+      this.speakResolve = null;
+      this.speakReject = null;
     }
   }
 

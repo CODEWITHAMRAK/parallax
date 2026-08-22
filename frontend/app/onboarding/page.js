@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { useSession } from 'next-auth/react';
+import { useSession, signOut } from 'next-auth/react';
 import useNavigationStore from '@/store/useNavigationStore';
 import useLocalizationStore from '@/store/useLocalizationStore';
 import { useVoice, VoiceState } from '@/hooks/useVoice';
@@ -262,7 +262,14 @@ export default function LanguageSelectionPage() {
 
   if (step === 'mode') {
     return (
-      <main className="min-h-screen bg-[#fcf9f8] flex flex-col items-center justify-center p-6 md:p-12">
+      <main className="min-h-screen bg-[#fcf9f8] flex flex-col items-center justify-center p-6 md:p-12 relative">
+        <Button 
+          variant="ghost" 
+          onClick={() => signOut({ callbackUrl: '/' })}
+          className="absolute top-4 right-4 md:top-6 md:right-6 text-slate-500 hover:text-slate-800 font-medium z-10"
+        >
+          Log Out
+        </Button>
         <div className="w-full max-w-[800px] text-center mb-16 mt-8 flex flex-col items-center">
           <img 
             src="/logo.png" 
@@ -310,6 +317,13 @@ export default function LanguageSelectionPage() {
   if (step === 'language' && interactionMode === 'voice') {
     return (
       <main className="min-h-screen bg-[#fcf9f8] flex flex-col items-center justify-center p-6 md:p-12 pb-24 relative">
+        <Button 
+          variant="ghost" 
+          onClick={() => signOut({ callbackUrl: '/' })}
+          className="absolute top-4 right-4 md:top-6 md:right-6 text-slate-500 hover:text-slate-800 font-medium z-10"
+        >
+          Log Out
+        </Button>
         <div className="w-full max-w-[800px] text-center space-y-8">
           <div className="w-32 h-32 md:w-48 md:h-48 rounded-full bg-[#003441] text-white flex items-center justify-center mx-auto mb-8 animate-pulse shadow-2xl">
             <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -346,6 +360,13 @@ export default function LanguageSelectionPage() {
   // Visual Language Selection
   return (
     <main className="min-h-screen bg-[#fcf9f8] flex flex-col items-center justify-center p-6 md:p-12 pb-24 relative">
+      <Button 
+        variant="ghost" 
+        onClick={() => signOut({ callbackUrl: '/' })}
+        className="absolute top-4 right-4 md:top-6 md:right-6 text-slate-500 hover:text-slate-800 font-medium z-10"
+      >
+        Log Out
+      </Button>
       <div className="w-full max-w-[800px] text-center mb-12 mt-8">
         <h1 className="font-heading text-5xl md:text-6xl text-[#003441] tracking-tight font-bold mb-4">
           Choose Your Language

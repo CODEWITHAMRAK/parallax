@@ -11,7 +11,7 @@ import { useRouter } from 'next/navigation';
 export default function HomePage() {
   const { setPage, setSystemMessage, language } = useNavigationStore();
   const { interactionMode } = useVoiceStore();
-  const { playSystemAudio } = useVoice();
+  const { playSystemAudio, pauseListening } = useVoice();
   const t = useLocalizationStore(state => state.t);
   const router = useRouter();
 
@@ -22,6 +22,7 @@ export default function HomePage() {
     setPage('home');
     if (isVoiceMode && !hasGreetedRef.current) {
       hasGreetedRef.current = true;
+      pauseListening(false);
       
       const initGreeting = async () => {
         if (language && language !== 'English') {
