@@ -8,6 +8,7 @@ import { useVoiceStore, useVoice } from '@/hooks/useVoice.js';
 import { useRouter } from 'next/navigation';
 import { GraduationCap, Landmark, Bus, FileText, Volume2 } from 'lucide-react';
 import { fetchAllSchemas } from '@/lib/apiService.js';
+import { apiFetch } from '@/lib/api.js';
 
 // Color and icon mapping for specific forms to aid cognitive inclusivity
 const getFormStyling = (formId) => {
@@ -48,7 +49,7 @@ export default function HomePage() {
         const formTitles = (data || []).map(f => f.title);
         setAvailableForms(formTitles);
 
-        const infoRes = await fetch("http://localhost:8080/api/information");
+        const infoRes = await apiFetch("/api/information");
         if (infoRes.ok) {
             const infoData = await infoRes.json();
             setInfos(infoData);
