@@ -95,22 +95,28 @@ export function useVoice() {
   }, []);
 
   const playScannerAudio = useCallback((text) => {
+    // Exact strings emitted by GuidanceEngine + DocumentScanner capture flow.
+    // Each maps to a pre-saved .wav filename under /audio/scanner/{lang}/.
     const textToKey = {
-      "Document lost. Find the document.": "document_lost",
-      "Move slightly left.": "move_left",
-      "Move slightly right.": "move_right",
-      "Move slightly up.": "move_up",
-      "Move slightly down.": "move_down",
-      "Move closer.": "move_closer",
-      "Move slightly back.": "move_back",
-      "Tilt your phone slightly.": "tilt_phone",
-      "Hold still.": "hold_still",
-      "Document captured.": "document_captured",
-      "Verifying document readability...": "verifying_document",
-      "This looks good. Would you like to use this document?": "looks_good",
-      "Please try again.": "try_again",
-      "Saving document...": "saving_document",
-      "Upload failed. Please try again.": "upload_failed"
+      // Guidance instructions
+      'Point your camera at the document.' : 'document_lost',
+      'Move back a little.'                : 'move_back',
+      'Move closer to the document.'       : 'move_closer',
+      'Point camera down a little.'        : 'move_down',
+      'Point camera up a little.'          : 'move_up',
+      'Point camera left a little.'        : 'move_left',
+      'Point camera right a little.'       : 'move_right',
+      'Straighten the document.'           : 'tilt_phone',
+      'Hold still.'                        : 'hold_still',
+
+      // Capture & verification flow
+      'Document captured.'                 : 'document_captured',
+      'Document captured. Processing...'   : 'document_captured',
+      'Verifying document readability...'  : 'verifying_document',
+      'This looks good. Would you like to use this document?' : 'looks_good',
+      'Please try again.'                  : 'try_again',
+      'Saving document...'                 : 'saving_document',
+      'Upload failed. Please try again.'   : 'upload_failed',
     };
 
     const langMap = {

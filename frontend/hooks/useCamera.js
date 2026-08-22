@@ -1,82 +1,104 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 
 export function useCamera() {
-  const [stream, setStream] = useState(null);
   const [error, setError] = useState(null);
-  const videoRef = useRef(null);
+  const videoRef    = useRef(null);
+  const streamRef   = useRef(null);
+  const isMounted   = useRef(true);
 
-  const streamRef = useRef(null);
-  const isMounted = useRef(true);
-
+  // Track mounted state
   useEffect(() => {
     isMounted.current = true;
-    return () => {
-      isMounted.current = false;
-    };
+    return () => { isMounted.current = false; };
   }, []);
 
+  // ── Key fix: whenever the stream changes, attach it to the video element.
+  // This decouples stream acquisition from video-element availability,
+  // which solves the React Strict Mode double-mount black-screen bug.
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !streamRef.current) return;
+
+    // CRITICAL FIX: Only set srcObject if it's actually different.
+    // Setting it repeatedly on every render causes the video element
+    // to restart its pipeline and flicker!
+    if (video.srcObject !== streamRef.current) {
+      video.srcObject = streamRef.current;
+      video.play().catch(err => {
+        if (err.name !== 'AbortError') console.error('Video play failed:', err);
+      });
+    }
+  });
+
   const startCamera = useCallback(async () => {
+    // Don't start a second stream if one is already running
+    if (streamRef.current) return;
+
+    setError(null);
     try {
       const mediaStream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } },
+        video: {
+          facingMode: 'environment',
+          width:  { ideal: 1920 },
+          height: { ideal: 1080 },
+        },
         audio: false,
       });
 
       if (!isMounted.current) {
-        // Component unmounted while waiting for camera permission
+        // Component unmounted while waiting for permission
         mediaStream.getTracks().forEach(t => t.stop());
         return;
       }
 
-      // Attempt to turn on the flashlight (torch) to improve document detection
+      // Optional: turn on torch
       const track = mediaStream.getVideoTracks()[0];
-      if (track && track.getCapabilities) {
+      if (track?.getCapabilities) {
         try {
-          const capabilities = track.getCapabilities();
-          if (capabilities.torch) {
-            await track.applyConstraints({
-              advanced: [{ torch: true }]
-            });
+          const caps = track.getCapabilities();
+          if (caps.torch) {
+            await track.applyConstraints({ advanced: [{ torch: true }] });
           }
-        } catch (err) {
-          console.warn("Flashlight not supported", err);
+        } catch {
+          // torch not supported — ignore
         }
       }
 
       streamRef.current = mediaStream;
-      setStream(mediaStream);
-      if (videoRef.current) {
-        videoRef.current.srcObject = mediaStream;
-        try {
-          await videoRef.current.play();
-        } catch (playErr) {
-          if (playErr.name !== 'AbortError') {
-            console.error("Video play failed", playErr);
-          }
-        }
+
+      // Attach to video element immediately if it's already in the DOM
+      const video = videoRef.current;
+      if (video) {
+        video.srcObject = mediaStream;
+        video.play().catch(err => {
+          if (err.name !== 'AbortError') console.error('Video play failed:', err);
+        });
       }
+      // If videoRef isn't ready yet, the useEffect above will attach it
+      // on the next render.
+
     } catch (err) {
-      setError(err.message || 'Failed to access camera');
-      console.error(err);
+      if (isMounted.current) {
+        setError(err.message || 'Failed to access camera');
+        console.error('Camera error:', err);
+      }
     }
   }, []);
 
   const stopCamera = useCallback(() => {
     if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current.getTracks().forEach(t => t.stop());
       streamRef.current = null;
-      setStream(null);
     }
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
   }, []);
 
+  // Clean up stream on unmount
   useEffect(() => {
-    return () => {
-      stopCamera(); // Cleanup on unmount
-    };
+    return () => { stopCamera(); };
   }, [stopCamera]);
 
-  return { stream, error, videoRef, startCamera, stopCamera };
+  return { error, videoRef, startCamera, stopCamera };
 }

@@ -1,10 +1,11 @@
 import fs from 'fs';
+import { getSarvamApiKey } from '../utils/sarvamKeys.js';
 
 export const transcribeAudio = async (req, res) => {
   try {
-    const apiKey = process.env.SARVAM_API_KEY;
+    const apiKey = getSarvamApiKey();
     if (!apiKey) {
-      throw new Error("SARVAM_API_KEY is not defined in environment variables");
+      throw new Error("SARVAM_API_KEYS is not defined in environment variables");
     }
     if (!req.file) {
       return res.status(400).json({ message: "No audio file provided" });
@@ -41,9 +42,9 @@ export const transcribeAudio = async (req, res) => {
 
 export const speakText = async (req, res) => {
   try {
-    const apiKey = process.env.SARVAM_API_KEY;
+    const apiKey = getSarvamApiKey();
     if (!apiKey) {
-      throw new Error("SARVAM_API_KEY is not defined in environment variables");
+      throw new Error("SARVAM_API_KEYS is not defined in environment variables");
     }
 
     const { text, languageCode = "hi-IN" } = req.body;

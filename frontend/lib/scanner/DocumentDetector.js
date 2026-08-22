@@ -1,45 +1,46 @@
 /**
  * DocumentDetector — OpenCV.js document edge detection.
  *
- * All OpenCV Mats are created and deleted within each detect() call.
- * This avoids "deleted object" errors from React Strict Mode double-mounting.
+ * Design:
+ *  1. The caller passes in the video element and a hidden canvas.
+ *  2. We draw the video onto the canvas at a fixed processing width (480px)
+ *     keeping the video's native aspect ratio — NO cropping.
+ *  3. We return corners in process-space. The caller (drawOverlay) maps them
+ *     to display-space using the same object-fit:cover math the browser uses.
  *
- * Algorithm:
- * 1. Greyscale + Gaussian blur
- * 2. Adaptive threshold (handles uneven / low lighting)
- * 3. Morphological close (fills small holes in mask)
- * 4. RETR_EXTERNAL contour search
- * 5. ConvexHull + approxPolyDP with epsilon sweep → 4-corner polygon
- * 6. Bounding-rect fallback so the outline always appears
- * 7. 5-frame majority-vote temporal smoothing
+ * KEY INSIGHT: We do NOT try to pre-crop the video to match the screen here.
+ * That was causing all the bugs. Instead:
+ *  - We process the FULL video frame (uncropped).
+ *  - We return the detection result in process-space.
+ *  - The GuidanceEngine works in process-space (which matches the video).
+ *  - drawOverlay maps process-space → display-space for rendering.
+ *
+ * All Mats are created and deleted locally so React Strict Mode is safe.
  */
 export class DocumentDetector {
   constructor(cv) {
     this.cv = cv;
+    this.processWidth  = 320;  // lower res = faster processing
+    this.processHeight = 0;    // computed from video aspect ratio
 
-    this.processWidth  = 640;
-    this.processHeight = 0; // computed on first frame
-
-    // Temporal smoothing
-    this.historySize      = 5;
+    // Temporal smoothing — require 2 of 3 frames to agree
+    this.historySize      = 3;
     this.geometryHistory  = [];
     this.lastGoodGeometry = null;
   }
 
-  /** No-op — nothing to clean up since all Mats are local to detect(). */
   cleanup() {}
 
   /**
-   * Detect the largest document-like quadrilateral in the video frame.
-   * @param {HTMLVideoElement}  videoEl
-   * @param {HTMLCanvasElement} canvasEl  — hidden scratch canvas
-   * @returns {{ corners, center, areaRatio, angle, processWidth, processHeight } | null}
+   * @param {HTMLVideoElement} videoEl
+   * @param {HTMLCanvasElement} canvasEl  — hidden offscreen canvas for processing
+   * @returns {Object|null} geometry result with corners in process-space
    */
   detect(videoEl, canvasEl) {
     const cv = this.cv;
     if (!cv || !videoEl || videoEl.videoWidth === 0) return null;
 
-    // ── Initialise processing resolution on first frame ───────────────────
+    // Compute process dimensions from NATIVE video aspect ratio (no cropping)
     if (this.processHeight === 0) {
       this.processHeight = Math.round(
         videoEl.videoHeight * (this.processWidth / videoEl.videoWidth)
@@ -48,182 +49,174 @@ export class DocumentDetector {
     const W = this.processWidth;
     const H = this.processHeight;
 
-    // Size the hidden canvas once
-    if (canvasEl.width  !== W) canvasEl.width  = W;
+    // Resize hidden canvas only when needed
+    if (canvasEl.width !== W) canvasEl.width = W;
     if (canvasEl.height !== H) canvasEl.height = H;
 
     const ctx = canvasEl.getContext('2d', { willReadFrequently: true });
+    // Draw the FULL video frame (no cropping) scaled down to process resolution
     ctx.drawImage(videoEl, 0, 0, W, H);
 
-    // ── All Mats are local so they can't become stale across unmounts ─────
-    let src       = null;
-    let gray      = null;
-    let blurred   = null;
-    let thresh    = null;
-    let morphed   = null;
-    let kernel    = null;
-    let contours  = null;
-    let hierarchy = null;
-
-    let result = null;
+    let result   = null;
+    const locals = [];
+    const mat    = (m) => { locals.push(m); return m; };
 
     try {
-      const imageData = ctx.getImageData(0, 0, W, H);
-
-      // 1. Read pixels into a Mat
-      src = cv.matFromImageData(imageData);
-
-      // 2. Greyscale + Gaussian blur
-      gray    = new cv.Mat();
-      blurred = new cv.Mat();
+      // ── 1. Greyscale ──────────────────────────────────────────────
+      const src  = mat(cv.matFromImageData(ctx.getImageData(0, 0, W, H)));
+      const gray = mat(new cv.Mat());
       cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+
+      // ── 2. Blur ───────────────────────────────────────────────────
+      const blurred = mat(new cv.Mat());
       cv.GaussianBlur(gray, blurred, new cv.Size(5, 5), 0);
 
-      // 3. Adaptive threshold — works in variable / low lighting
-      thresh = new cv.Mat();
-      cv.adaptiveThreshold(
-        blurred, thresh,
-        255,
-        cv.ADAPTIVE_THRESH_MEAN_C,
-        cv.THRESH_BINARY_INV,
-        15,  // block size (must be odd)
-        4    // constant subtracted from mean
-      );
+      // ── 3. Canny with Otsu-guided thresholds ──────────────────────
+      const otsuBin  = mat(new cv.Mat());
+      const otsuVal  = cv.threshold(blurred, otsuBin, 0, 255,
+                        cv.THRESH_BINARY | cv.THRESH_OTSU);
+      const hi = Math.max(30, Math.min(otsuVal, 200));
+      const lo = hi * 0.4;
 
-      // 4. Morphological close — fills gaps in the mask
-      morphed = new cv.Mat();
-      kernel  = cv.Mat.ones(5, 5, cv.CV_8U);
-      cv.morphologyEx(thresh, morphed, cv.MORPH_CLOSE, kernel);
+      const edges = mat(new cv.Mat());
+      cv.Canny(blurred, edges, lo, hi, 3);
 
-      // 5. Find external contours only
-      contours  = new cv.MatVector();
-      hierarchy = new cv.Mat();
-      cv.findContours(
-        morphed, contours, hierarchy,
-        cv.RETR_EXTERNAL,
-        cv.CHAIN_APPROX_SIMPLE
-      );
+      // ── 4. Dilate to close gaps ───────────────────────────────────
+      const kernel = mat(cv.Mat.ones(5, 5, cv.CV_8U));
+      cv.dilate(edges, edges, kernel, new cv.Point(-1, -1), 1);
 
-      // 6. Find the best document candidate
+      // ── 5. Find external contours ─────────────────────────────────
+      const contours  = mat(new cv.MatVector());
+      const hierarchy = mat(new cv.Mat());
+      cv.findContours(edges, contours, hierarchy,
+                      cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+
+      // ── 6. Find the best quadrilateral ────────────────────────────
       const frameArea = W * H;
-      const minArea   = frameArea * 0.06;
+      const minArea   = frameArea * 0.03;
 
       let maxArea     = 0;
       let bestCorners = null;
       let fallbackRect = null;
 
       for (let i = 0; i < contours.size(); i++) {
-        const cnt  = contours.get(i);
-        const area = cv.contourArea(cnt);
+        const cnt     = contours.get(i);
+        const cntArea = cv.contourArea(cnt);
+        if (cntArea < minArea) { cnt.delete(); continue; }
 
-        if (area > minArea && area > maxArea) {
-          maxArea = area;
-
-          // Store bounding rect for fallback
-          fallbackRect = cv.boundingRect(cnt);
-
-          // ConvexHull removes concavities (crumpled paper, fingers, etc.)
-          const hull  = new cv.Mat();
-          cv.convexHull(cnt, hull, false, true);
-
-          const peri   = cv.arcLength(hull, true);
-          const approx = new cv.Mat();
-          let   found4 = false;
-
-          // Sweep epsilon until exactly 4 corners are found
-          for (let eps = 0.02; eps <= 0.12; eps += 0.01) {
-            cv.approxPolyDP(hull, approx, eps * peri, true);
-            if (approx.rows === 4) { found4 = true; break; }
-          }
-
-          hull.delete();
-
-          if (found4) {
-            const corners = [];
-            for (let j = 0; j < 4; j++) {
-              corners.push({
-                x: approx.data32S[j * 2],
-                y: approx.data32S[j * 2 + 1],
-              });
-            }
-            bestCorners = corners;
-          }
-          approx.delete();
-        }
+        const hull     = mat(new cv.Mat());
+        cv.convexHull(cnt, hull, false, true);
+        const hullArea = cv.contourArea(hull);
         cnt.delete();
+
+        if (hullArea < minArea || hullArea > frameArea * 0.98) continue;
+        if (hullArea <= maxArea) continue;
+
+        maxArea      = hullArea;
+        fallbackRect = cv.boundingRect(hull);
+
+        // Approximate to quadrilateral with increasing epsilon
+        const peri   = cv.arcLength(hull, true);
+        const approx = mat(new cv.Mat());
+        let found4   = false;
+
+        for (let eps = 0.02; eps <= 0.12; eps += 0.01) {
+          cv.approxPolyDP(hull, approx, eps * peri, true);
+          if (approx.rows === 4) { found4 = true; break; }
+        }
+
+        if (found4) {
+          const corners = [];
+          for (let j = 0; j < 4; j++) {
+            corners.push({
+              x: Math.max(0, Math.min(W - 1, approx.data32S[j * 2])),
+              y: Math.max(0, Math.min(H - 1, approx.data32S[j * 2 + 1])),
+            });
+          }
+          bestCorners = corners;
+        }
       }
 
-      // 7. Build result from 4-corner polygon, or fall back to bounding rect
+      // ── 7. Build result ───────────────────────────────────────────
       if (bestCorners) {
-        result = this._buildResult(bestCorners, maxArea);
+        result = this._buildResult(bestCorners, W, H);
       } else if (fallbackRect) {
         const r = fallbackRect;
         const corners = [
-          { x: r.x,          y: r.y          },
-          { x: r.x + r.width, y: r.y          },
+          { x: r.x,           y: r.y },
+          { x: r.x + r.width, y: r.y },
           { x: r.x + r.width, y: r.y + r.height },
-          { x: r.x,          y: r.y + r.height },
+          { x: r.x,           y: r.y + r.height },
         ];
-        result = this._buildResult(corners, r.width * r.height);
+        result = this._buildResult(corners, W, H);
       }
 
     } catch (err) {
-      console.error('[DocumentDetector] error:', err);
+      console.error('[DocumentDetector]', err);
     } finally {
-      // Always free every Mat created in this call
-      const del = (m) => { try { if (m && !m.isDeleted()) m.delete(); } catch(e){} };
-      del(src); del(gray); del(blurred); del(thresh);
-      del(morphed); del(kernel); del(contours); del(hierarchy);
+      locals.forEach(m => { try { if (!m.isDeleted()) m.delete(); } catch(e){} });
     }
 
-    // ── 8. Temporal smoothing (5-frame majority vote) ─────────────────────
+    // ── 8. Temporal smoothing ───────────────────────────────────────
     this.geometryHistory.push(result !== null);
     if (this.geometryHistory.length > this.historySize) this.geometryHistory.shift();
-
     if (result !== null) this.lastGoodGeometry = result;
 
     const positives = this.geometryHistory.filter(Boolean).length;
-    if (positives >= Math.ceil(this.historySize / 2)) {
-      return this.lastGoodGeometry;
-    }
-    return null;
+    return positives >= Math.ceil(this.historySize / 2)
+      ? this.lastGoodGeometry
+      : null;
   }
 
-  /** Compute centre, areaRatio, and angle from 4 corners + area. */
-  _buildResult(corners, area) {
-    const center = corners.reduce(
-      (acc, c) => ({ x: acc.x + c.x, y: acc.y + c.y }),
-      { x: 0, y: 0 }
-    );
+  /**
+   * Build a standardised geometry result from 4 corners.
+   * All values are in process-space (480 × H pixels).
+   */
+  _buildResult(corners, W, H) {
+    // ── Center of the quadrilateral ────────────────────────────────
+    const center = { x: 0, y: 0 };
+    for (const c of corners) { center.x += c.x; center.y += c.y; }
     center.x /= 4;
     center.y /= 4;
 
-    const frameArea = this.processWidth * this.processHeight;
-    const areaRatio = area / frameArea;
-
-    // Use the longest edge to determine the primary orientation angle
-    let maxDist = 0;
-    let angle   = 0;
+    // ── Quadrilateral area via Shoelace ────────────────────────────
+    let quadArea = 0;
     for (let i = 0; i < 4; i++) {
-      const a = corners[i];
-      const b = corners[(i + 1) % 4];
+      const p1 = corners[i], p2 = corners[(i + 1) % 4];
+      quadArea += (p1.x * p2.y - p2.x * p1.y);
+    }
+    quadArea = Math.abs(quadArea / 2);
+    const areaRatio = Math.min(quadArea / (W * H), 1.0);
+
+    // ── Edge crop flags ─────────────────────────────────────────────
+    // A corner is "cropped" only if it's within 3px of the frame edge.
+    // Corners that extend beyond the frame get clamped to 0 or W-1 by
+    // the detector, so a truly clipped corner will be at 0/1/2.
+    // The old percentage margin (7+ px) was catching normal corners
+    // that happened to be near the edge, causing false "Move back."
+    const margin = 5;
+    const isCroppedLeft   = Math.min(...corners.map(c => c.x)) <= margin;
+    const isCroppedRight  = Math.max(...corners.map(c => c.x)) >= W - margin;
+    const isCroppedTop    = Math.min(...corners.map(c => c.y)) <= margin;
+    const isCroppedBottom = Math.max(...corners.map(c => c.y)) >= H - margin;
+
+    // ── Tilt angle (longest edge) ─────────────────────────────────
+    let maxDist = 0, angle = 0;
+    for (let i = 0; i < 4; i++) {
+      const a = corners[i], b = corners[(i + 1) % 4];
       const d = Math.hypot(b.x - a.x, b.y - a.y);
       if (d > maxDist) {
         maxDist = d;
-        angle   = Math.atan2(b.y - a.y, b.x - a.x) * (180 / Math.PI);
+        angle = Math.atan2(b.y - a.y, b.x - a.x) * (180 / Math.PI);
       }
     }
-    // Normalise to [-45, 45] so portrait & landscape both read near 0 when straight
     angle = ((angle % 90) + 90) % 90;
     if (angle > 45) angle -= 90;
 
     return {
-      corners,
-      center,
-      areaRatio,
-      angle,
-      processWidth:  this.processWidth,
-      processHeight: this.processHeight,
+      corners, center, areaRatio, angle,
+      isCroppedTop, isCroppedBottom, isCroppedLeft, isCroppedRight,
+      processWidth: W, processHeight: H,
     };
   }
 }

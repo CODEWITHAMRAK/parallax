@@ -137,16 +137,29 @@ export default function DocumentScanner({ expectedDocumentType = "income_certifi
     
     lastProcessTime.current = now;
 
+    const video = videoRef.current;
+    const rect = video.getBoundingClientRect();
+    const dw = Math.round(rect.width);
+    const dh = Math.round(rect.height);
+
     let geometry = null;
     try {
-      geometry = detectorRef.current.detect(videoRef.current, canvasRef.current);
+      // detect() processes the FULL uncropped video frame
+      geometry = detectorRef.current.detect(video, canvasRef.current);
     } catch(e) {
       console.error('[Scanner] detect() threw:', e);
     }
 
     drawOverlay(geometry);
 
-    const guidance = guidanceRef.current.process(geometry, speakInstruction);
+    // Pass viewport info so GuidanceEngine can map process-space → visible crop
+    const viewport = {
+      displayWidth:  dw,
+      displayHeight: dh,
+      videoWidth:    video.videoWidth,
+      videoHeight:   video.videoHeight,
+    };
+    const guidance = guidanceRef.current.process(geometry, speakInstruction, viewport);
     
     if (guidance.currentInstruction) {
       setGuidanceText(guidance.currentInstruction);
@@ -187,8 +200,10 @@ export default function DocumentScanner({ expectedDocumentType = "income_certifi
     // Read the display size from the video element's bounding rect
     // (not .clientWidth which can be stale before layout finishes)
     const rect   = video.getBoundingClientRect();
-    const dw     = rect.width;
-    const dh     = rect.height;
+    // Round to integers — getBoundingClientRect() returns subpixel decimals
+    // that vary frame-to-frame, causing canvas resets (= flicker) every frame.
+    const dw = Math.round(rect.width);
+    const dh = Math.round(rect.height);
 
     // Only resize the canvas when the display size actually changed —
     // assigning canvas.width/height clears the canvas AND resets all context state.
@@ -327,10 +342,17 @@ export default function DocumentScanner({ expectedDocumentType = "income_certifi
   const handleRetry = (msg) => {
     if (msg) speakInstruction(msg);
     hasTriggeredCapture.current = false;
+    // Re-instantiate to pick up latest class regardless of hot-reload state
+    guidanceRef.current = new GuidanceEngine();
     setCapturedImage(null);
     setVerificationResult(null);
+    // CRITICAL: update the ref first, then state, then restart the rAF loop
+    scannerStateRef.current = SCANNER_STATES.SEARCHING;
     setScannerState(SCANNER_STATES.SEARCHING);
     setGuidanceText("Find the document. Point your camera at it.");
+    // The rAF loop stopped when we entered DONE_STATES — restart it
+    if (requestRef.current) cancelAnimationFrame(requestRef.current);
+    requestRef.current = requestAnimationFrame(processFrame);
   };
 
   const handleAccept = async () => {

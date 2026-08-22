@@ -4,115 +4,133 @@ export class ImageProcessor {
   }
 
   /**
-   * Warps the document into a flat rectangle and calculates quality metrics.
-   * @param {HTMLVideoElement} videoElement - The high-res source video.
-   * @param {Object} geometry - The geometry from DocumentDetector.
-   * @returns {Object} { dataUrl, quality: { sharpness, brightness } }
+   * Warps the detected document into a flat rectangle and calculates quality.
+   * @param {HTMLVideoElement} videoElement - High-res source video.
+   * @param {Object} geometry - Geometry from DocumentDetector (corners in processWidth/processHeight space).
+   * @returns {{ dataUrl, quality: { sharpness, brightness } } | null}
    */
   process(videoElement, geometry) {
     if (!this.cv || !videoElement || !geometry) return null;
 
-    // Create a temporary canvas for the full resolution frame
+    // Draw the current full-res video frame onto a temp canvas
     const canvas = document.createElement('canvas');
-    canvas.width = videoElement.videoWidth;
+    canvas.width  = videoElement.videoWidth;
     canvas.height = videoElement.videoHeight;
     const ctx = canvas.getContext('2d');
     ctx.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
 
-    let src = this.cv.imread(canvas);
-    let dst = new this.cv.Mat();
+    let src    = null;
+    let dst    = null;
+    let srcTri = null;
+    let dstTri = null;
+    let M      = null;
+    let gray   = null;
+    let lap    = null;
+    let mean   = null;
+    let stddev = null;
+    let meanB  = null;
+    let stdB   = null;
     let result = null;
 
     try {
-      // Scale geometry corners from process resolution to full resolution
-      const scaleX = canvas.width / geometry.processWidth;
+      // ── Scale corners from process resolution → full video resolution ─────
+      const scaleX = canvas.width  / geometry.processWidth;
       const scaleY = canvas.height / geometry.processHeight;
 
-      const corners = geometry.corners.map(c => ({
-        x: c.x * scaleX,
-        y: c.y * scaleY
+      const rawCorners = geometry.corners.map(c => ({
+        // Clamp to frame bounds — out-of-bounds corners collapse the warp
+        x: Math.max(0, Math.min(canvas.width  - 1, c.x * scaleX)),
+        y: Math.max(0, Math.min(canvas.height - 1, c.y * scaleY)),
       }));
 
-      // Order corners: top-left, top-right, bottom-right, bottom-left
-      // A simple sorting approach based on x+y and x-y
-      corners.sort((a, b) => (a.y + a.x) - (b.y + b.x));
-      const tl = corners[0];
-      const br = corners[3];
-      const remaining = [corners[1], corners[2]].sort((a, b) => a.x - b.x);
-      const tr = remaining[1];
-      const bl = remaining[0];
+      // ── Robust corner ordering (works for any rotation) ───────────────────
+      // Standard trick: 
+      //   Top-Left     → min(x + y)
+      //   Bottom-Right → max(x + y)
+      //   Top-Right    → min(y - x)   (equivalently min(x - y) gives BL, but we use y-x)
+      //   Bottom-Left  → max(y - x)
+      const sum  = rawCorners.map(c => c.x + c.y);
+      const diff = rawCorners.map(c => c.y - c.x);
 
-      // Calculate width and height of the new document
-      const widthA = Math.sqrt(Math.pow(br.x - bl.x, 2) + Math.pow(br.y - bl.y, 2));
-      const widthB = Math.sqrt(Math.pow(tr.x - tl.x, 2) + Math.pow(tr.y - tl.y, 2));
-      const maxWidth = Math.max(Math.floor(widthA), Math.floor(widthB));
+      const tl = rawCorners[sum.indexOf(Math.min(...sum))];
+      const br = rawCorners[sum.indexOf(Math.max(...sum))];
+      const tr = rawCorners[diff.indexOf(Math.min(...diff))];
+      const bl = rawCorners[diff.indexOf(Math.max(...diff))];
 
-      const heightA = Math.sqrt(Math.pow(tr.x - br.x, 2) + Math.pow(tr.y - br.y, 2));
-      const heightB = Math.sqrt(Math.pow(tl.x - bl.x, 2) + Math.pow(tl.y - bl.y, 2));
-      const maxHeight = Math.max(Math.floor(heightA), Math.floor(heightB));
+      // ── Compute output dimensions from the corner distances ───────────────
+      const widthTop    = Math.hypot(tr.x - tl.x, tr.y - tl.y);
+      const widthBottom = Math.hypot(br.x - bl.x, br.y - bl.y);
+      const maxWidth    = Math.max(Math.round(widthTop), Math.round(widthBottom));
 
-      let srcTri = this.cv.matFromArray(4, 1, this.cv.CV_32FC2, [
-        tl.x, tl.y, tr.x, tr.y, br.x, br.y, bl.x, bl.y
+      const heightLeft  = Math.hypot(bl.x - tl.x, bl.y - tl.y);
+      const heightRight = Math.hypot(br.x - tr.x, br.y - tr.y);
+      const maxHeight   = Math.max(Math.round(heightLeft), Math.round(heightRight));
+
+      // Sanity: if computed size is implausibly small, warp would be garbage —
+      // return the full-frame capture instead so the user at least sees something.
+      if (maxWidth < 80 || maxHeight < 80) {
+        console.warn('[ImageProcessor] Warp too small — falling back to full frame.');
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+        return { dataUrl, quality: { sharpness: 80, brightness: 0.5 } };
+      }
+
+      // ── Perspective warp ──────────────────────────────────────────────────
+      src = this.cv.imread(canvas);
+
+      srcTri = this.cv.matFromArray(4, 1, this.cv.CV_32FC2, [
+        tl.x, tl.y,
+        tr.x, tr.y,
+        br.x, br.y,
+        bl.x, bl.y,
       ]);
-      
-      let dstTri = this.cv.matFromArray(4, 1, this.cv.CV_32FC2, [
-        0, 0, maxWidth, 0, maxWidth, maxHeight, 0, maxHeight
+
+      dstTri = this.cv.matFromArray(4, 1, this.cv.CV_32FC2, [
+        0,        0,
+        maxWidth, 0,
+        maxWidth, maxHeight,
+        0,        maxHeight,
       ]);
 
-      let M = this.cv.getPerspectiveTransform(srcTri, dstTri);
-      let dsize = new this.cv.Size(maxWidth, maxHeight);
-      
-      this.cv.warpPerspective(src, dst, M, dsize, this.cv.INTER_LINEAR, this.cv.BORDER_CONSTANT, new this.cv.Scalar());
+      M   = this.cv.getPerspectiveTransform(srcTri, dstTri);
+      dst = new this.cv.Mat();
+      this.cv.warpPerspective(
+        src, dst, M,
+        new this.cv.Size(maxWidth, maxHeight),
+        this.cv.INTER_LINEAR,
+        this.cv.BORDER_REPLICATE  // replicate edge pixels instead of filling black
+      );
 
-      // Draw the flattened document to a new canvas to get Data URL
+      // ── Export to Data URL ────────────────────────────────────────────────
       const outCanvas = document.createElement('canvas');
       this.cv.imshow(outCanvas, dst);
-      const dataUrl = outCanvas.toDataURL('image/jpeg', 0.9);
+      const dataUrl = outCanvas.toDataURL('image/jpeg', 0.92);
 
-      // --- Quality Metrics ---
-      // 1. Sharpness (Variance of Laplacian)
-      let gray = new this.cv.Mat();
+      // ── Quality metrics ───────────────────────────────────────────────────
+      gray = new this.cv.Mat();
       this.cv.cvtColor(dst, gray, this.cv.COLOR_RGBA2GRAY);
-      
-      let laplacian = new this.cv.Mat();
-      this.cv.Laplacian(gray, laplacian, this.cv.CV_64F, 1, 1, 0, this.cv.BORDER_DEFAULT);
-      
-      let mean = new this.cv.Mat();
-      let stddev = new this.cv.Mat();
-      this.cv.meanStdDev(laplacian, mean, stddev);
-      
+
+      // Sharpness: variance of Laplacian
+      lap = new this.cv.Mat();
+      this.cv.Laplacian(gray, lap, this.cv.CV_64F);
+      mean   = new this.cv.Mat();
+      stddev = new this.cv.Mat();
+      this.cv.meanStdDev(lap, mean, stddev);
       const sharpness = Math.pow(stddev.doubleAt(0, 0), 2);
-      
-      // 2. Brightness (Mean pixel value)
-      let meanBrightness = new this.cv.Mat();
-      let stddevBrightness = new this.cv.Mat();
-      this.cv.meanStdDev(gray, meanBrightness, stddevBrightness);
-      const brightness = meanBrightness.doubleAt(0, 0) / 255.0; // Normalized 0-1
 
-      result = {
-        dataUrl,
-        quality: {
-          sharpness,
-          brightness
-        }
-      };
+      // Brightness: mean grey value normalised to [0, 1]
+      meanB = new this.cv.Mat();
+      stdB  = new this.cv.Mat();
+      this.cv.meanStdDev(gray, meanB, stdB);
+      const brightness = meanB.doubleAt(0, 0) / 255;
 
-      // Cleanup
-      srcTri.delete();
-      dstTri.delete();
-      M.delete();
-      gray.delete();
-      laplacian.delete();
-      mean.delete();
-      stddev.delete();
-      meanBrightness.delete();
-      stddevBrightness.delete();
+      result = { dataUrl, quality: { sharpness, brightness } };
 
     } catch (err) {
-      console.error("OpenCV ImageProcessing error:", err);
+      console.error('[ImageProcessor] error:', err);
     } finally {
-      src.delete();
-      dst.delete();
+      const del = (m) => { try { if (m && !m.isDeleted()) m.delete(); } catch(e){} };
+      del(src); del(dst); del(srcTri); del(dstTri); del(M);
+      del(gray); del(lap); del(mean); del(stddev); del(meanB); del(stdB);
     }
 
     return result;
