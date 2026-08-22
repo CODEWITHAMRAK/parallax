@@ -35,7 +35,7 @@ export class GuidanceEngine {
     this.lostFrames          = 0;
     this.debounceMs          = 3500;   // min gap before speaking a NEW instruction
     this.reminderMs          = 6000;   // min gap before repeating the SAME instruction
-    this.stabilityTarget     = 8;      // frames of "Hold still" before auto-capture
+    this.stabilityTarget     = 5;      // frames of "Hold still" before auto-capture
     this.lostFrameThreshold  = 12;     // frames without detection before "lost" warning
 
     this.pendingInstruction  = null;
@@ -113,27 +113,23 @@ export class GuidanceEngine {
     const isCurrentlyStable = (this.currentDisplayedInstruction === 'Hold still.');
     const tol = isCurrentlyStable ? 1.3 : 1.0;
 
-    const H_MARGIN  = visibleRegion.w * 0.15 * tol;
-    const V_MARGIN  = visibleRegion.h * 0.15 * tol;
+    const H_MARGIN  = visibleRegion.w * 0.25 * tol;
+    const V_MARGIN  = visibleRegion.h * 0.25 * tol;
     
     const visibleAreaRatio = (visibleRegion.w * visibleRegion.h) / (processWidth * processHeight);
     const docVisibleRatio = areaRatio / visibleAreaRatio;
-    const MIN_DOC_VISIBLE_RATIO = isCurrentlyStable ? 0.25 : 0.35;
+    const MIN_DOC_VISIBLE_RATIO = isCurrentlyStable ? 0.15 : 0.20;
     const MAX_ANGLE = isCurrentlyStable ? 18 : 12;
 
     let instruction = null;
     let isStable    = false;
 
     // ── Priority 1: Edge cropping ──────────────────────────────────
-    // Opposite edges both cropped = too close (can't fix by panning).
-    // But only if the doc actually fills a big chunk of the frame —
-    // small area + opposite-edge flags = false positive from contour noise.
-    const oppositeCrop = (isCroppedTop && isCroppedBottom) ||
-                         (isCroppedLeft && isCroppedRight);
-    const cropCount = [isCroppedTop, isCroppedBottom, isCroppedLeft, isCroppedRight]
-                        .filter(Boolean).length;
+    // If the document is taking up a lot of the screen and touches ANY edge,
+    // they are likely too close or trying to pan when they shouldn't.
+    const isCropped = isCroppedTop || isCroppedBottom || isCroppedLeft || isCroppedRight;
 
-    if ((oppositeCrop || cropCount >= 3) && docVisibleRatio > 0.80) {
+    if (isCropped && docVisibleRatio > 0.60) {
       instruction = 'Move back a little.';
     }
     // Single-edge crop = camera aimed too far in that direction.
