@@ -3,7 +3,33 @@
 import React, { useEffect, useState, useRef } from "react";
 import useFormStore from "../store/useFormStore.js";
 import useNavigationStore from "../store/useNavigationStore.js";
+import useLocalizationStore, { useTranslation } from "../store/useLocalizationStore.js";
 import { Button } from "./ui/button.jsx";
+import {
+    Card,
+    CardContent,
+    CardHeader,
+    CardTitle,
+    CardDescription,
+} from "./ui/card.jsx";
+import { Input } from "./ui/input.jsx";
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "./ui/select.jsx";
+import {
+    Dialog,
+    DialogContent,
+    DialogHeader,
+    DialogTitle,
+    DialogDescription,
+    DialogFooter,
+} from "./ui/dialog.jsx";
+import { Progress } from "./ui/progress.jsx";
+import { Label } from "./ui/label.jsx";
 import { executeAction } from "../lib/actionDispatcher.js";
 import { useRouter } from "next/navigation";
 import { ACTIONS } from "../lib/navigation.js";
@@ -25,7 +51,7 @@ import {
     Sparkles,
     Eye,
     X,
-    ExternalLink
+    ExternalLink,
 } from "lucide-react";
 import { apiFetch } from "../lib/api.js";
 
@@ -44,6 +70,7 @@ export default function AccessibleForm({ formId }) {
         useNavigationStore();
     const router = useRouter();
     const { speak, queueSpeak, waitForSpeakQueue, pauseListening } = useVoice();
+    const t = useTranslation();
 
     const [activeScannerTarget, setActiveScannerTarget] = useState(null); // 'autofill' or field object
     const [isProcessing, setIsProcessing] = useState(false);
@@ -56,7 +83,9 @@ export default function AccessibleForm({ formId }) {
             if (!formId) return;
             await loadSchema(formId);
             try {
-                const submissionRes = await apiFetch(`/api/submissions/${formId}`);
+                const submissionRes = await apiFetch(
+                    `/api/submissions/${formId}`,
+                );
                 let loadedSubmission = false;
                 if (submissionRes.ok) {
                     const existingSub = await submissionRes.json();
@@ -67,17 +96,22 @@ export default function AccessibleForm({ formId }) {
                         }));
                         const currentSchema = useFormStore.getState().schema;
                         if (currentSchema) {
-                            useNavigationStore.getState().setStep(currentSchema.steps.length);
+                            useNavigationStore
+                                .getState()
+                                .setStep(currentSchema.steps.length);
                         }
                         loadedSubmission = true;
                     }
                 }
-                
+
                 if (!loadedSubmission) {
                     const draftData = await getDraft(formId);
                     if (draftData && draftData.draft) {
                         useFormStore.setState((state) => ({
-                            values: { ...state.values, ...draftData.draft.values },
+                            values: {
+                                ...state.values,
+                                ...draftData.draft.values,
+                            },
                         }));
                         if (draftData.draft.currentStepIndex !== undefined) {
                             useNavigationStore
@@ -120,7 +154,8 @@ export default function AccessibleForm({ formId }) {
 
         if (
             schema &&
-            (schema.steps[currentStepIndex] || currentStepIndex === schema.steps.length) &&
+            (schema.steps[currentStepIndex] ||
+                currentStepIndex === schema.steps.length) &&
             !hasAssistantGreeting &&
             draftLoaded &&
             !fetchingRef.current
@@ -138,8 +173,11 @@ export default function AccessibleForm({ formId }) {
 
             const fetchGreeting = async () => {
                 try {
-                    const isReviewStep = currentStepIndex === schema.steps.length;
-                    const currentStep = isReviewStep ? { title: "Review", id: "review_step", fields: [] } : schema.steps[currentStepIndex];
+                    const isReviewStep =
+                        currentStepIndex === schema.steps.length;
+                    const currentStep = isReviewStep
+                        ? { title: "Review", id: "review_step", fields: [] }
+                        : schema.steps[currentStepIndex];
                     const context = {
                         current_page: "form",
                         form_title: schema.title,
@@ -149,35 +187,59 @@ export default function AccessibleForm({ formId }) {
                             fields: currentStep.fields,
                         },
                         form_values: useFormStore.getState().values,
-                        available_steps: schema.steps.map((s) => s.id),
+                        available_steps: [
+                            ...schema.steps.map((s) => s.id),
+                            "review_step",
+                        ],
                     };
-                    const docType = currentStep.autofill_document_type ? ` You can ask them to upload their ${currentStep.autofill_document_type} to autofill this step.` : "";
+                    const formValues = useFormStore.getState().values;
+                    const stepFields = currentStep.fields || [];
+                    const missingRequired = stepFields.filter(f => f.required && !formValues[f.id]);
+                    const isFullyFilled = stepFields.length > 0 && missingRequired.length === 0;
+                    
+                    const hasUploadedFiles = Object.values(formValues).some(v => typeof v === 'string' && (v.startsWith('http') || v.startsWith('data:')));
+                    
+                    const docType = (currentStep.autofill_document_type && !hasUploadedFiles) 
+                        ? ` You can ask them to upload their ${currentStep.autofill_document_type} to autofill this step.` 
+                        : "";
                     
                     let promptMsg = "";
                     if (useFormStore.getState().isSubmitted) {
                         promptMsg = `I just opened this application but I have already submitted it previously. Let me know that my form is already submitted, and ask if I would like to view my submitted details or delete my previous submission to restart.`;
                     } else if (isReviewStep) {
                         promptMsg = `I just entered the Review step. Please read out my details and ask me to confirm if everything is correct before I submit.`;
+                    } else if (isFullyFilled) {
+                        promptMsg = `I just entered the ${currentStep.title} step, but I have already filled out all the required information here. Please let me know that my details/documents are already provided and ask if I want to review/modify them, or proceed to the next step.`;
                     } else if (currentStepIndex === 0) {
-                        promptMsg = `I just started the application. Please introduce the form and let me know I can tell you my details or scan/upload documents to autofill.${docType}`;
+                        promptMsg = `I just started the application. Please introduce the form and ask for my details.${!hasUploadedFiles ? ` Let me know I can tell you my details or scan/upload documents to autofill.` : ''}${docType}`;
                     } else {
-                        promptMsg = `I just entered the ${currentStep.title} step. Please briefly announce this step and remind me I can tell you my details or scan/upload documents.${docType}`;
+                        promptMsg = `I just entered the ${currentStep.title} step. Please briefly announce this step and ask for my details.${!hasUploadedFiles ? ` Remind me I can tell you my details or scan/upload documents.` : ''}${docType}`;
                     }
 
-                    const action = await fetchChatActionStream(promptMsg, context, (sentence) => {
-                        if (currentMode === "voice") {
-                            queueSpeak(sentence);
-                        }
-                        useNavigationStore.getState().appendSystemMessage(sentence);
-                    });
+                    const action = await fetchChatActionStream(
+                        promptMsg,
+                        context,
+                        (sentence) => {
+                            if (currentMode === "voice") {
+                                queueSpeak(sentence);
+                            }
+                            useNavigationStore
+                                .getState()
+                                .appendSystemMessage(sentence);
+                        },
+                    );
 
                     if (action && action.message) {
                         setSystemMessage(action.message);
                         if (currentMode === "voice") {
                             waitForSpeakQueue().then(() => {
-                                const modeAfter = document.getElementById("interaction-mode-indicator")?.dataset?.mode;
+                                const modeAfter = document.getElementById(
+                                    "interaction-mode-indicator",
+                                )?.dataset?.mode;
                                 if (modeAfter === "voice") {
-                                    window.dispatchEvent(new Event("start-voice-turn"));
+                                    window.dispatchEvent(
+                                        new Event("start-voice-turn"),
+                                    );
                                 }
                             });
                         }
@@ -234,37 +296,49 @@ export default function AccessibleForm({ formId }) {
         const handleSubmit = async () => {
             try {
                 const res = await apiFetch(`/api/submissions/${formId}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ values: useFormStore.getState().values })
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        values: useFormStore.getState().values,
+                    }),
                 });
-                
+
                 if (res.ok) {
                     setSystemMessage("Form successfully submitted.", true);
                     useFormStore.getState().resetForm();
                     useNavigationStore.getState().resetNavigation();
-                    
-                    const currentMode = document.getElementById("interaction-mode-indicator")?.dataset?.mode;
+
+                    const currentMode = document.getElementById(
+                        "interaction-mode-indicator",
+                    )?.dataset?.mode;
                     if (currentMode === "voice") {
                         speak("Form successfully submitted.").then(() => {
-                            router.push('/home');
+                            router.push("/home");
                         });
                     } else {
-                        router.push('/home');
+                        router.push("/home");
                     }
                 } else {
                     const data = await res.json();
-                    setSystemMessage(`Failed to submit form: ${data.error}`, true);
+                    setSystemMessage(
+                        `Failed to submit form: ${data.error}`,
+                        true,
+                    );
                 }
             } catch (err) {
                 console.error("Submission error", err);
-                setSystemMessage("Failed to submit form due to a network error.", true);
+                setSystemMessage(
+                    "Failed to submit form due to a network error.",
+                    true,
+                );
             }
         };
 
         const handleRestart = async () => {
             try {
-                await apiFetch(`/api/submissions/${formId}`, { method: 'DELETE' });
+                await apiFetch(`/api/submissions/${formId}`, {
+                    method: "DELETE",
+                });
             } catch (e) {
                 console.error("Failed to delete form", e);
             }
@@ -374,13 +448,19 @@ export default function AccessibleForm({ formId }) {
                 form_values: useFormStore.getState().values,
                 available_steps: schema.steps.map((s) => s.id),
             };
-            const action = await fetchChatActionStream(msg, context, (sentence) => {
-                const currentMode = document.getElementById("interaction-mode-indicator")?.dataset?.mode;
-                if (currentMode === "voice") {
-                    queueSpeak(sentence);
-                }
-                useNavigationStore.getState().appendSystemMessage(sentence);
-            });
+            const action = await fetchChatActionStream(
+                msg,
+                context,
+                (sentence) => {
+                    const currentMode = document.getElementById(
+                        "interaction-mode-indicator",
+                    )?.dataset?.mode;
+                    if (currentMode === "voice") {
+                        queueSpeak(sentence);
+                    }
+                    useNavigationStore.getState().appendSystemMessage(sentence);
+                },
+            );
 
             if (action && action.message) {
                 setSystemMessage(action.message);
@@ -390,8 +470,11 @@ export default function AccessibleForm({ formId }) {
                 if (currentMode === "voice") {
                     waitForSpeakQueue().then(() => {
                         setTimeout(
-                            () => window.dispatchEvent(new Event("start-voice-turn")),
-                            200
+                            () =>
+                                window.dispatchEvent(
+                                    new Event("start-voice-turn"),
+                                ),
+                            200,
                         );
                     });
                 }
@@ -492,42 +575,75 @@ export default function AccessibleForm({ formId }) {
         );
     }
 
-    if (!schema) return null;
+    if (!schema || !draftLoaded) {
+        return (
+            <div className="w-full flex flex-col items-center justify-center min-h-[500px] text-center p-8 space-y-6">
+                <Loader2 className="w-12 h-12 text-primary animate-spin mb-4" />
+                <h2 className="text-2xl font-bold text-foreground">
+                    Loading your application...
+                </h2>
+            </div>
+        );
+    }
 
     if (isSubmitted) {
         return (
             <div className="w-full flex flex-col items-center justify-center min-h-[500px] text-center p-8 space-y-6">
-                <div className="w-24 h-24 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-4 border-4 border-emerald-50">
-                    <CheckCircle className="w-12 h-12 text-emerald-600" />
+                <div className="w-24 h-24 bg-primary/10 border border-border rounded-full flex items-center justify-center mx-auto mb-4">
+                    <CheckCircle className="w-12 h-12 text-primary" />
                 </div>
-                <h2 className="text-4xl font-bold text-slate-800">Application Submitted</h2>
-                <p className="text-xl text-slate-600 max-w-lg mx-auto">
-                    You have already successfully submitted this application. Your details have been recorded.
+                <h2 className="text-4xl md:text-5xl font-extrabold text-foreground">
+                    Application Submitted
+                </h2>
+                <p className="text-lg md:text-xl text-muted-foreground max-w-lg mx-auto font-medium">
+                    You have already successfully submitted this application.
+                    Your details have been recorded.
                 </p>
-                
-                <div className="w-full max-w-3xl mt-8 mb-8 text-left bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
-                    <div className="bg-slate-50 border-b border-slate-200 px-6 py-4">
-                        <h3 className="text-xl font-bold text-slate-800">Submitted Details</h3>
-                    </div>
-                    <div className="p-6 divide-y divide-slate-100">
+
+                <Card className="w-full max-w-3xl mt-8 mb-8 text-left shadow-sm overflow-hidden">
+                    <CardHeader className="bg-muted border-b border-border px-8 py-5">
+                        <CardTitle className="text-2xl font-bold text-foreground">
+                            Submitted Details
+                        </CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-8 divide-y divide-border">
                         {schema.steps.map((step) => (
-                            <div key={step.id} className="py-4 first:pt-0 last:pb-0">
-                                <h4 className="text-lg font-bold text-primary mb-4">{step.title}</h4>
-                                <dl className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
+                            <div
+                                key={step.id}
+                                className="py-6 first:pt-0 last:pb-0"
+                            >
+                                <h4 className="text-xl font-bold text-primary mb-4">
+                                    {step.title}
+                                </h4>
+                                <dl className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">
                                     {step.fields.map((field) => (
-                                        <div key={field.id} className="flex flex-col">
-                                            <dt className="text-sm font-semibold text-slate-500 mb-1">{field.label}</dt>
-                                            <dd className="text-base font-medium text-slate-900">
+                                        <div
+                                            key={field.id}
+                                            className="flex flex-col"
+                                        >
+                                            <dt className="text-sm font-bold text-muted-foreground mb-1 uppercase tracking-wider">
+                                                {field.label}
+                                            </dt>
+                                            <dd className="text-lg font-medium text-foreground">
                                                 {field.type === "file" ? (
                                                     values[field.id] ? (
-                                                        <a href={values[field.id]} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline flex items-center gap-1">
-                                                            View Document <ExternalLink className="w-4 h-4" />
+                                                        <a
+                                                            href={
+                                                                values[field.id]
+                                                            }
+                                                            target="_blank"
+                                                            rel="noopener noreferrer"
+                                                            className="text-primary hover:underline flex items-center gap-1 font-bold"
+                                                        >
+                                                            View Document{" "}
+                                                            <ExternalLink className="w-4 h-4" />
                                                         </a>
                                                     ) : (
                                                         "Not uploaded"
                                                     )
                                                 ) : (
-                                                    values[field.id] || "Not provided"
+                                                    values[field.id] ||
+                                                    "Not provided"
                                                 )}
                                             </dd>
                                         </div>
@@ -535,19 +651,34 @@ export default function AccessibleForm({ formId }) {
                                 </dl>
                             </div>
                         ))}
-                    </div>
-                </div>
+                    </CardContent>
+                </Card>
                 <div className="flex flex-col sm:flex-row gap-4 pt-8 justify-center w-full">
                     <Button
-                        onClick={() => executeAction({ action: ACTIONS.NAVIGATE_PAGE, target: 'home' }, router)}
-                        className="h-16 px-8 text-xl bg-primary text-primary-foreground rounded-xl font-bold hover:bg-primary/90 shadow-md flex-1 max-w-[250px]"
+                        size="lg"
+                        onClick={() =>
+                            executeAction(
+                                {
+                                    action: ACTIONS.NAVIGATE_PAGE,
+                                    target: "home",
+                                },
+                                router,
+                            )
+                        }
+                        className="h-16 px-10 text-xl font-bold flex-1 max-w-[250px]"
                     >
                         Back to Home
                     </Button>
                     <Button
-                        variant="outline"
-                        onClick={() => executeAction({ action: ACTIONS.RESTART_FORM }, router)}
-                        className="h-16 px-8 text-xl border-2 border-red-500 text-red-600 hover:bg-red-50 rounded-xl font-bold transition-all flex-1 max-w-[250px]"
+                        size="lg"
+                        variant="destructive"
+                        onClick={() =>
+                            executeAction(
+                                { action: ACTIONS.RESTART_FORM },
+                                router,
+                            )
+                        }
+                        className="h-16 px-10 text-xl font-bold flex-1 max-w-[250px]"
                     >
                         Delete & Restart
                     </Button>
@@ -557,10 +688,10 @@ export default function AccessibleForm({ formId }) {
     }
 
     const isReviewStep = currentStepIndex === schema.steps.length;
-    const currentStep = isReviewStep 
-        ? { title: "Review & Submit", id: "review_step", fields: [] } 
+    const currentStep = isReviewStep
+        ? { title: "Review & Submit", id: "review_step", fields: [] }
         : schema.steps[currentStepIndex];
-    
+
     if (!currentStep) return null;
 
     const handleNext = () => {
@@ -576,7 +707,7 @@ export default function AccessibleForm({ formId }) {
     return (
         <div className="w-full flex flex-col justify-between relative min-h-[500px]">
             {isProcessing && (
-                <div className="absolute inset-0 z-40 bg-background/80 backdrop-blur-sm rounded-2xl flex flex-col items-center justify-center">
+                <div className="absolute inset-0 z-40 bg-background/80 backdrop-blur-sm rounded-lg flex flex-col items-center justify-center">
                     <Loader2 className="w-16 h-16 text-primary animate-spin mb-4" />
                     <p className="text-2xl font-bold text-primary animate-pulse">
                         Processing Document...
@@ -594,74 +725,81 @@ export default function AccessibleForm({ formId }) {
 
             <div>
                 {/* Step Header & Progress Bar */}
-                <div className="mb-8 space-y-3">
+                <div className="mb-10 space-y-4">
                     <div className="flex items-center justify-between">
-                        <span className="text-xs md:text-sm font-bold uppercase tracking-wider text-[#003441] bg-[#003441]/10 px-3.5 py-1 rounded-full">
-                            Step {Math.min(currentStepIndex + 1, schema.steps.length)} of {schema.steps.length}
+                        <span className="text-sm font-bold uppercase tracking-wider text-primary bg-primary/10 border border-primary/20 px-4 py-1.5 rounded-lg">
+                            Step{" "}
+                            {Math.min(
+                                currentStepIndex + 1,
+                                schema.steps.length,
+                            )}{" "}
+                            of {schema.steps.length}
                         </span>
-                        <span className="text-xs md:text-sm font-bold text-slate-500">
+                        <span className="text-sm font-bold text-muted-foreground font-mono">
                             {Math.round(
-                                (Math.min(currentStepIndex + 1, schema.steps.length) / schema.steps.length) *
+                                (Math.min(
+                                    currentStepIndex + 1,
+                                    schema.steps.length,
+                                ) /
+                                    schema.steps.length) *
                                     100,
                             )}
                             % Complete
                         </span>
                     </div>
 
-                    <h2 className="font-heading text-3xl md:text-4xl font-bold text-primary tracking-tight">
+                    <h2 className="text-3xl md:text-4xl font-extrabold text-foreground tracking-tight">
                         {currentStep.title}
                     </h2>
 
                     {/* Visual Progress Bar */}
-                    <div
-                        className="w-full bg-slate-200 h-2.5 rounded-full overflow-hidden"
-                        role="progressbar"
-                        aria-valuenow={Math.min(currentStepIndex + 1, schema.steps.length)}
-                        aria-valuemin={1}
-                        aria-valuemax={schema.steps.length}
-                        aria-label={`Step ${Math.min(currentStepIndex + 1, schema.steps.length)} of ${schema.steps.length}`}
-                    >
-                        <div
-                            className="bg-[#003441] h-full rounded-full transition-all duration-500 ease-out shadow-sm"
-                            style={{
-                                width: `${(Math.min(currentStepIndex + 1, schema.steps.length) / schema.steps.length) * 100}%`,
-                            }}
-                        />
-                    </div>
+                    <Progress
+                        value={
+                            (Math.min(
+                                currentStepIndex + 1,
+                                schema.steps.length,
+                            ) /
+                                schema.steps.length) *
+                            100
+                        }
+                        className="h-3"
+                    />
                 </div>
 
                 {/* Impairment-Friendly Big Button Autofill Bar */}
                 {currentStep.fields.some((f) => f.type !== "file") && (
-                    <div className="mb-8 p-4 md:p-5 rounded-2xl bg-[#003441]/5 border-2 border-[#003441]/20">
-                        <div className="flex items-center gap-2 mb-3">
-                            <Sparkles className="w-5 h-5 text-[#003441]" />
-                            <p className="text-base md:text-lg font-bold text-[#003441]">
+                    <div className="mb-10 p-6 rounded-md bg-secondary/10 border border-border">
+                        <div className="flex items-center gap-3 mb-4">
+                            <Sparkles className="w-6 h-6 text-secondary" />
+                            <p className="text-lg md:text-xl font-extrabold text-foreground">
                                 Autofill this step with a document:
                             </p>
                         </div>
 
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 md:gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <Button
                                 type="button"
+                                size="lg"
                                 onClick={() =>
                                     setActiveScannerTarget("autofill")
                                 }
-                                className="h-16 md:h-18 px-6 rounded-2xl bg-[#003441] hover:bg-[#002833] text-white text-lg md:text-xl font-bold flex items-center justify-center gap-3 shadow-md hover:scale-[1.01] active:scale-[0.98] transition-all"
+                                className="h-16 md:h-[72px] px-6 text-xl bg-secondary text-secondary-foreground hover:bg-secondary/90 flex items-center justify-center gap-3"
                             >
-                                <Camera className="w-6 h-6 md:w-7 md:h-7 shrink-0" />
+                                <Camera className="w-7 h-7 shrink-0" />
                                 <span>Scan Document</span>
                             </Button>
                             <Button
                                 type="button"
                                 variant="outline"
+                                size="lg"
                                 onClick={() => {
                                     setActiveFileTarget("autofill");
                                     fileInputRef.current.click();
                                 }}
-                                className="h-16 md:h-18 px-6 rounded-2xl bg-white hover:bg-slate-100 border-2 border-slate-300 text-[#003441] text-lg md:text-xl font-bold flex items-center justify-center gap-3 shadow-sm hover:scale-[1.01] active:scale-[0.98] transition-all"
+                                className="h-16 md:h-[72px] px-6 text-xl border-border bg-card text-foreground flex items-center justify-center gap-3"
                             >
-                                <Upload className="w-6 h-6 md:w-7 md:h-7 shrink-0" />
-                                <span>Upload PDF / Photo</span>
+                                <Upload className="w-7 h-7 shrink-0" />
+                                <span>Upload File</span>
                             </Button>
                         </div>
                     </div>
@@ -670,24 +808,44 @@ export default function AccessibleForm({ formId }) {
                 <div className="space-y-6">
                     {isReviewStep ? (
                         <div className="flex flex-col gap-6">
-                            <h2 className="text-3xl font-bold text-slate-800 mb-2">Review Your Application</h2>
-                            <p className="text-lg text-slate-600 mb-6">Please check all your details before submitting.</p>
-                            {schema.steps.map(step => (
-                                <div key={step.id} className="bg-white p-6 rounded-[1.5rem] shadow-sm border border-slate-200">
-                                    <h3 className="text-2xl font-bold mb-4 text-[#003441]">{step.title}</h3>
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                        {step.fields.map(field => (
-                                            <div key={field.id} className="flex flex-col">
-                                                <span className="text-slate-500 text-sm font-bold uppercase tracking-wider">{field.label}</span>
-                                                <span className="text-xl font-medium text-slate-900 mt-1">
-                                                    {field.type === 'file' && values[field.id] 
-                                                        ? "Document Uploaded" 
-                                                        : values[field.id] || "Not provided"}
-                                                </span>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
+                            <h2 className="text-3xl md:text-4xl font-extrabold text-foreground mb-2">
+                                Review Your Application
+                            </h2>
+                            <p className="text-lg md:text-xl text-muted-foreground font-medium mb-6">
+                                Please check all your details before submitting.
+                            </p>
+                            {schema.steps.map((step) => (
+                                <Card key={step.id} className="shadow-sm">
+                                    <CardHeader>
+                                        <CardTitle className="text-2xl font-bold text-primary">
+                                            {step.title}
+                                        </CardTitle>
+                                    </CardHeader>
+                                    <CardContent>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                                            {step.fields.map((field) => (
+                                                <div
+                                                    key={field.id}
+                                                    className="flex flex-col"
+                                                >
+                                                    <span className="text-muted-foreground text-sm font-bold uppercase tracking-wider mb-1">
+                                                        {field.label}
+                                                    </span>
+                                                    <span className="text-xl font-medium text-foreground">
+                                                        {field.type ===
+                                                            "file" &&
+                                                        values[field.id]
+                                                            ? "Document Uploaded"
+                                                            : values[
+                                                                  field.id
+                                                              ] ||
+                                                              "Not provided"}
+                                                    </span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </CardContent>
+                                </Card>
                             ))}
                         </div>
                     ) : (
@@ -695,18 +853,18 @@ export default function AccessibleForm({ formId }) {
                             const isFocused = currentFieldId === field.id;
 
                             return (
-                                <div
+                                <Card
                                     key={field.id}
                                     id={`field-container-${field.id}`}
-                                    className={`flex flex-col gap-3 p-6 rounded-2xl transition-all duration-300 ${
+                                    className={`flex flex-col gap-4 p-8 transition-all duration-300 ${
                                         isFocused
-                                            ? "bg-primary/5 border-2 border-primary shadow-sm scale-[1.01]"
-                                            : "bg-white hover:bg-slate-50 border-2 border-transparent"
+                                            ? "bg-primary/5 border-primary shadow-sm"
+                                            : ""
                                     }`}
                                 >
                                     <label
                                         htmlFor={field.id}
-                                        className="text-2xl font-bold text-foreground flex items-center gap-2"
+                                        className="text-xl font-bold text-foreground flex items-center gap-2"
                                     >
                                         {field.label}
                                         {field.required && (
@@ -717,83 +875,99 @@ export default function AccessibleForm({ formId }) {
                                     </label>
 
                                     {field.type === "select" ? (
-                                        <select
-                                            id={field.id}
+                                        <Select
                                             value={values[field.id] || ""}
-                                            onChange={(e) =>
+                                            onValueChange={(val) =>
                                                 useFormStore
                                                     .getState()
                                                     .updateValue(
                                                         field.id,
-                                                        e.target.value,
+                                                        val,
                                                         true,
                                                     )
                                             }
-                                            className={`h-[64px] rounded-lg px-4 bg-input text-xl text-foreground border-b-2 outline-none transition-all ${
-                                                isFocused
-                                                    ? "border-primary border-2"
-                                                    : "border-border"
-                                            }`}
                                         >
-                                            <option value="" disabled>
-                                                Select an option...
-                                            </option>
-                                            {field.options?.map((opt) => (
-                                                <option key={opt} value={opt}>
-                                                    {opt}
-                                                </option>
-                                            ))}
-                                        </select>
+                                            <SelectTrigger
+                                                id={field.id}
+                                                className={`h-14 text-lg bg-card ${isFocused ? "ring-2 ring-primary" : ""}`}
+                                            >
+                                                <SelectValue placeholder="Select an option..." />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {field.options?.map((opt) => (
+                                                    <SelectItem
+                                                        key={opt}
+                                                        value={opt}
+                                                        className="text-lg"
+                                                    >
+                                                        {opt}
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
                                     ) : field.type === "file" ? (
                                         <div className="flex flex-col md:flex-row gap-4">
                                             <Button
+                                                size="lg"
                                                 onClick={() =>
-                                                    setActiveScannerTarget(field)
+                                                    setActiveScannerTarget(
+                                                        field,
+                                                    )
                                                 }
-                                                className={`h-[64px] flex-1 text-xl font-bold rounded-lg transition-all flex items-center justify-center gap-2 ${values[field.id] ? "bg-green-600 hover:bg-green-700 text-white" : "bg-primary hover:bg-primary/90 text-primary-foreground"}`}
+                                                className={`h-14 flex-1 text-lg font-bold transition-all flex items-center justify-center gap-2 ${values[field.id] ? "bg-secondary hover:bg-secondary/90 text-secondary-foreground" : "bg-primary hover:bg-primary/90 text-primary-foreground"}`}
                                             >
                                                 {values[field.id] ? (
                                                     <>
-                                                        <CheckCircle /> Verified
-                                                        (Rescan)
+                                                        <CheckCircle className="w-6 h-6" />{" "}
+                                                        Verified ({t("rescan")})
                                                     </>
                                                 ) : (
                                                     <>
-                                                        <Camera /> Scan Document
+                                                        <Camera className="w-6 h-6" />{" "}
+                                                        Scan Document
                                                     </>
                                                 )}
                                             </Button>
                                             <Button
                                                 variant="outline"
+                                                size="lg"
                                                 onClick={() => {
                                                     setActiveFileTarget(field);
                                                     fileInputRef.current.click();
                                                 }}
-                                                className={`h-[64px] flex-1 text-xl font-bold rounded-lg transition-all flex items-center justify-center gap-2 border-2 ${values[field.id] ? "border-green-600 text-green-600" : "border-primary text-primary"}`}
+                                                className={`h-14 flex-1 text-lg font-bold bg-card transition-all flex items-center justify-center gap-2 border ${values[field.id] ? "border-secondary text-secondary" : "border-border text-foreground"}`}
                                             >
                                                 {values[field.id] ? (
                                                     <>
-                                                        <CheckCircle /> Verified
-                                                        (Re-upload)
+                                                        <CheckCircle className="w-6 h-6" />{" "}
+                                                        Verified (
+                                                        {t("reupload")})
                                                     </>
                                                 ) : (
                                                     <>
-                                                        <Upload /> Upload File
+                                                        <Upload className="w-6 h-6" />{" "}
+                                                        Upload File
                                                     </>
                                                 )}
                                             </Button>
                                             {values[field.id] && (
                                                 <Button
-                                                    variant="secondary"
-                                                    onClick={() => setViewImageTarget(values[field.id])}
-                                                    className="h-[64px] flex-1 text-xl font-bold rounded-lg transition-all flex items-center justify-center gap-2 bg-slate-200 hover:bg-slate-300 text-slate-800"
+                                                    variant="outline"
+                                                    size="lg"
+                                                    onClick={() =>
+                                                        setViewImageTarget(
+                                                            values[field.id],
+                                                        )
+                                                    }
+                                                    className="h-14 flex-1 text-lg font-bold transition-all flex items-center justify-center gap-2 bg-muted hover:bg-muted/80 text-foreground border-border"
                                                 >
-                                                    <Eye /> View Document
+                                                    <Eye className="w-6 h-6" />{" "}
+                                                    {t("view_document")}
                                                 </Button>
                                             )}
                                         </div>
                                     ) : (
-                                        <input
+                                        <Input
                                             id={field.id}
                                             type={field.type}
                                             value={values[field.id] || ""}
@@ -806,43 +980,43 @@ export default function AccessibleForm({ formId }) {
                                                         true,
                                                     )
                                             }
-                                            className={`h-[64px] rounded-lg px-4 bg-input text-xl text-foreground border-b-2 outline-none transition-all ${
-                                                isFocused
-                                                    ? "border-primary border-2"
-                                                    : "border-border"
-                                            }`}
+                                            className={`h-14 text-lg bg-card ${isFocused ? "ring-2 ring-primary" : ""}`}
                                         />
                                     )}
 
                                     {field.description && (
-                                        <p className="text-lg text-muted-foreground">
+                                        <p className="text-lg text-muted-foreground font-medium mt-1">
                                             {field.description}
                                         </p>
                                     )}
-                                </div>
+                                </Card>
                             );
                         })
                     )}
                 </div>
             </div>
 
-            <div className="mt-12 flex justify-between">
+            <div className="mt-16 flex gap-4">
                 <Button
                     variant="outline"
+                    size="lg"
                     onClick={handlePrev}
                     disabled={currentStepIndex === 0}
-                    className="h-[56px] px-8 text-xl text-primary border-2 border-primary rounded-lg font-semibold hover:bg-muted"
+                    className="h-14 md:h-16 px-8 text-lg md:text-xl font-bold bg-card border-border flex-1 max-w-[200px]"
                 >
-                    Back
+                    {t("go_back_form")}
                 </Button>
                 <Button
+                    size="lg"
                     onClick={handleNext}
                     disabled={isReviewStep && isSubmitted}
-                    className={`h-[56px] px-8 text-xl text-primary-foreground rounded-lg font-semibold shadow-none ${isReviewStep && isSubmitted ? 'bg-slate-400 opacity-50 cursor-not-allowed' : 'bg-primary hover:bg-primary/90'}`}
+                    className={`h-14 md:h-16 px-8 text-lg md:text-xl font-bold flex-1 ${isReviewStep && isSubmitted ? "opacity-50 cursor-not-allowed bg-muted text-muted-foreground" : "bg-primary hover:bg-primary/90"}`}
                 >
                     {isReviewStep
-                        ? isSubmitted ? "Already Submitted" : "Submit Application"
-                        : "Next Step"}
+                        ? isSubmitted
+                            ? "Already Submitted"
+                            : t("submit_application")
+                        : t("next")}
                 </Button>
             </div>
 
@@ -853,59 +1027,72 @@ export default function AccessibleForm({ formId }) {
                 />
             )}
 
-            {activeFileTarget && (
-                <div className="fixed inset-0 z-50 bg-background/95 backdrop-blur-sm flex flex-col items-center justify-center p-6">
-                    <div className="bg-white p-8 md:p-12 rounded-[2.5rem] shadow-2xl border-4 border-slate-200 max-w-lg w-full text-center space-y-6">
-                        <div className="w-24 h-24 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-2">
+            <Dialog
+                open={!!activeFileTarget}
+                onOpenChange={(open) => !open && setActiveFileTarget(null)}
+            >
+                <DialogContent className="sm:max-w-md text-center p-8 md:p-12">
+                    <div className="flex flex-col items-center space-y-6">
+                        <div className="w-24 h-24 bg-primary/10 border border-border rounded-full flex items-center justify-center mx-auto mb-2">
                             <Upload className="w-12 h-12 text-primary" />
                         </div>
-                        <h2 className="text-3xl md:text-4xl font-bold text-slate-800">
-                            Upload Document
-                        </h2>
-                        <p className="text-xl text-slate-600 font-medium">
-                            Please select the document file to upload for{" "}
-                            {activeFileTarget === "autofill"
-                                ? "auto-filling this step"
-                                : activeFileTarget?.label || "this field"}
-                            .
-                        </p>
-                        <div className="flex flex-col gap-4 mt-8">
+                        <DialogHeader>
+                            <DialogTitle className="text-3xl md:text-4xl font-extrabold text-foreground text-center">
+                                Upload Document
+                            </DialogTitle>
+                            <DialogDescription className="text-lg md:text-xl font-medium text-center">
+                                Please select the document file to upload for{" "}
+                                {activeFileTarget === "autofill"
+                                    ? "auto-filling this step"
+                                    : activeFileTarget?.label || "this field"}
+                                .
+                            </DialogDescription>
+                        </DialogHeader>
+                        <div className="flex flex-col gap-4 mt-8 w-full">
                             <Button
+                                size="lg"
                                 onClick={() => {
                                     if (fileInputRef.current)
                                         fileInputRef.current.click();
                                 }}
-                                className="h-20 text-2xl bg-primary hover:bg-primary/90 text-white font-bold rounded-2xl shadow-md transition-all active:scale-[0.98]"
+                                className="h-16 text-xl font-bold transition-all w-full"
                             >
                                 Choose File
                             </Button>
                             <Button
                                 variant="outline"
+                                size="lg"
                                 onClick={() => setActiveFileTarget(null)}
-                                className="h-16 text-xl border-4 border-slate-200 text-slate-600 font-bold rounded-2xl hover:bg-slate-50 transition-all"
+                                className="h-16 text-lg border-border font-bold transition-all w-full"
                             >
                                 Cancel
                             </Button>
                         </div>
                     </div>
-                </div>
-            )}
+                </DialogContent>
+            </Dialog>
 
-            {viewImageTarget && (
-                <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex flex-col items-center justify-center p-6" onClick={() => setViewImageTarget(null)}>
-                    <div className="bg-white p-4 rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] flex flex-col gap-4" onClick={(e) => e.stopPropagation()}>
-                        <div className="flex justify-between items-center">
-                            <h2 className="text-2xl font-bold">Document Preview</h2>
-                            <Button variant="ghost" size="icon" onClick={() => setViewImageTarget(null)}>
-                                <X className="w-8 h-8" />
-                            </Button>
-                        </div>
-                        <div className="flex-1 overflow-auto rounded-lg border-2 border-slate-200 flex items-center justify-center bg-slate-50">
-                            <img src={viewImageTarget} alt="Document Preview" className="max-w-full max-h-[75vh] object-contain" />
-                        </div>
+            <Dialog
+                open={!!viewImageTarget}
+                onOpenChange={(open) => !open && setViewImageTarget(null)}
+            >
+                <DialogContent className="max-w-4xl p-6">
+                    <DialogHeader className="flex flex-row justify-between items-center mb-4 space-y-0">
+                        <DialogTitle className="text-2xl font-bold">
+                            Document Preview
+                        </DialogTitle>
+                    </DialogHeader>
+                    <div className="flex-1 overflow-auto rounded-lg border border-border flex items-center justify-center bg-muted min-h-[50vh]">
+                        {viewImageTarget && (
+                            <img
+                                src={viewImageTarget}
+                                alt="Document Preview"
+                                className="max-w-full max-h-[75vh] object-contain"
+                            />
+                        )}
                     </div>
-                </div>
-            )}
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }
