@@ -68,7 +68,7 @@ export class VoiceController {
       };
 
       this.mediaRecorder.onstop = () => {
-        const mimeType = this.mediaRecorder.mimeType || 'audio/webm';
+        const mimeType = (this.mediaRecorder && this.mediaRecorder.mimeType) ? this.mediaRecorder.mimeType : 'audio/webm';
         const audioBlob = new Blob(this.audioChunks, { type: mimeType });
         const process = this.shouldSubmit !== false;
         this.shouldSubmit = true; // reset
@@ -253,6 +253,9 @@ export class VoiceController {
         }
       };
       this.audioElement.play().catch((err) => {
+        if (err.name === 'NotAllowedError') {
+          console.warn('[VoiceService] Autoplay prevented by browser (user gesture required).');
+        }
         if (this.speakReject) {
           this.speakReject(err);
           this.speakResolve = null;
@@ -286,7 +289,11 @@ export class VoiceController {
           audioUrl = await fetchPromise;
           await this._playAudioUrl(audioUrl, onPlaybackStart);
         } catch (e) {
-          console.error("Queue TTS Error:", e);
+          if (e.name === "NotAllowedError") {
+            console.warn("[VoiceService] TTS playback skipped due to user interaction requirement.");
+          } else {
+            console.error("Queue TTS Error:", e);
+          }
           if (e.message === "INTERRUPTED") break;
         } finally {
           if (audioUrl) URL.revokeObjectURL(audioUrl);
