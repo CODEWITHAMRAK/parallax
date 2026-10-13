@@ -300,7 +300,7 @@ export default function DocumentScanner({ onCancel, onConfirm }) {
             />
             
             <div className="absolute bottom-12 left-4 right-4 text-center pointer-events-none z-30">
-              <div className="bg-primary/95 text-primary-foreground px-6 py-4 rounded-2xl shadow-2xl inline-block max-w-[90%] mx-auto backdrop-blur-sm border-2 border-primary-foreground/20">
+              <div className="bg-primary/95 text-primary-foreground px-6 py-4 rounded-lg shadow-2xl inline-block max-w-[90%] mx-auto backdrop-blur-sm border-2 border-primary-foreground/20">
                 <p className="text-2xl font-bold font-heading leading-tight">{guidanceText}</p>
               </div>
             </div>
