@@ -8,9 +8,9 @@ export const verifyDocument = async (req, res) => {
       return res.status(400).json({ success: false, message: "Missing fileDataUrl or expectedType" });
     }
 
-    const apiKey = process.env.MIMO_API_KEY;
+    const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
-      throw new Error("MIMO_API_KEY is not defined in environment variables");
+      throw new Error("GEMINI_API_KEY is not defined in environment variables");
     }
 
     const prompt = `You are a strict document verification system.
@@ -38,14 +38,14 @@ You MUST return ONLY valid JSON matching this exact schema:
       });
     }
 
-    const response = await fetch("https://api.xiaomimimo.com/v1/chat/completions", {
+    const response = await fetch("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", {
       method: "POST",
       headers: {
-        "api-key": apiKey,
+        "Authorization": `Bearer ${apiKey}`,
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        model: "mimo-v2.5",
+        model: "gemini-3.5-flash-lite",
         messages: [
           { 
             role: "user", 
@@ -57,8 +57,7 @@ You MUST return ONLY valid JSON matching this exact schema:
         ],
         max_tokens: 300,
         temperature: 0.1,
-        stream: false,
-        thinking: { type: "disabled" }
+        stream: false
       })
     });
 

@@ -70,20 +70,21 @@ Input JSON:
 ${JSON.stringify(baseDictionary, null, 2)}
 `;
 
-    const apiKey = process.env.MIMO_API_KEY;
-    const response = await fetch("https://api.xiaomimimo.com/v1/chat/completions", {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) throw new Error("GEMINI_API_KEY is not defined");
+
+    const response = await fetch("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", {
       method: "POST",
       headers: {
-        "api-key": apiKey,
+        "Authorization": `Bearer ${apiKey}`,
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        model: "mimo-v2.5",
+        model: "gemini-3.5-flash-lite",
         messages: [{ role: "user", content: prompt }],
         max_tokens: 1500,
         temperature: 0.1,
-        stream: false,
-        thinking: {type: "disabled"}
+        stream: false
       })
     });
 

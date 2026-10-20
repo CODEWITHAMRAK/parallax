@@ -57,8 +57,8 @@ export const speakText = async (req, res) => {
       inputs: [text],
       target_language_code: languageCode,
       speaker: "ishita",
-      pace: 1.0,
-      speech_sample_rate: 8000,
+      pace: 1.1,
+      speech_sample_rate: 22050,
       enable_preprocessing: true,
       model: "bulbul:v3"
     };

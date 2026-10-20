@@ -4,9 +4,19 @@ import React, { useEffect } from 'react';
 import { signOut, useSession } from 'next-auth/react';
 import { Button } from './ui/button';
 import useNavigationStore from '../store/useNavigationStore';
-import useLocalizationStore from '../store/useLocalizationStore';
+import useLocalizationStore, { useTranslation } from '../store/useLocalizationStore';
 import { useVoiceStore } from '../hooks/useVoice';
 import { updateUserLanguage, getUserProfile } from '../lib/apiService';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuGroup,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
 import Link from 'next/link';
 import { Home, Mic, MousePointer, Globe, LogOut } from 'lucide-react';
@@ -16,6 +26,7 @@ export default function Navbar() {
   const language = useNavigationStore((state) => state.language);
   const setLanguage = useNavigationStore((state) => state.setLanguage);
   const { interactionMode, setInteractionMode } = useVoiceStore();
+  const t = useTranslation();
 
   useEffect(() => {
     const syncProfileLanguage = async () => {
@@ -79,105 +90,119 @@ export default function Navbar() {
   };
 
   return (
-    <nav className="w-full border-b border-slate-200/80 bg-white/95 backdrop-blur-md px-2 sm:px-6 py-2.5 sm:py-3 flex flex-wrap items-center justify-between gap-y-2 z-50 sticky top-0 shadow-sm">
+    <nav className="w-full border-b border-border bg-background px-4 sm:px-8 py-4 flex flex-wrap items-center justify-between gap-y-4 z-50 sticky top-0 shadow-sm">
       {/* Brand & Home */}
-      <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
-        <Link href="/home" className="flex items-center gap-1.5 sm:gap-2 hover:opacity-90 transition-opacity">
-          <img 
-            src="/logo.png" 
-            alt="Parallax Logo" 
-            className="w-6 h-6 sm:w-8 sm:h-8 object-contain rounded-lg shadow-sm border border-slate-100 p-0.5 bg-white" 
-          />
-          <span className="font-heading text-base sm:text-2xl font-bold text-[#003441] tracking-tight">
+      <div className="flex items-center gap-4 shrink-0">
+        <Link href="/home" className="flex items-center gap-3 hover:opacity-80 transition-opacity">
+          <div className="w-10 h-10 rounded-lg border border-border bg-card flex items-center justify-center shadow-sm">
+            <img 
+              src="/logo.png" 
+              alt="Parallax Logo" 
+              className="w-6 h-6 object-contain" 
+            />
+          </div>
+          <span className="text-xl sm:text-2xl font-extrabold text-foreground tracking-tight">
             Parallax
           </span>
         </Link>
+        <div className="hidden sm:block h-6 w-[1px] bg-border mx-2"></div>
         <Link 
           href="/home" 
-          className="text-[10px] sm:text-sm font-semibold text-slate-600 hover:text-[#003441] px-1.5 sm:px-2 py-1 rounded-lg hover:bg-slate-100 flex items-center gap-1 transition-colors"
+          className="text-xs sm:text-sm font-bold font-mono text-muted-foreground hover:text-foreground px-3 py-1.5 rounded-lg hover:bg-muted flex items-center gap-2 transition-colors border border-transparent hover:border-border"
           title="Return to Home"
         >
-          <Home className="w-3 h-3 sm:w-4 sm:h-4" />
-          <span className="hidden md:inline-block">Home</span>
+          <Home className="w-4 h-4" />
+          <span className="hidden md:inline-block">{t('Home')}</span>
         </Link>
       </div>
       
       {/* Action Controls */}
-      <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
+      <div className="flex items-center gap-3 sm:gap-4 shrink-0">
+        
         {/* Tactile Segmented Mode Toggle */}
         <div 
-          className="inline-flex items-center p-0.5 sm:p-1 bg-slate-100/90 rounded-full border border-slate-200/90 shadow-inner shrink-0"
+          className="inline-flex items-center p-1 bg-surface-dim rounded-lg border border-border shadow-sm shrink-0"
           role="group"
           aria-label="Select interaction mode"
         >
           <button
             type="button"
             onClick={() => handleModeChange('voice')}
-            className={`flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1 text-[10px] sm:text-xs font-bold rounded-full transition-all duration-150 ${
+            className={`flex items-center gap-2 px-3 py-1.5 text-xs font-bold rounded-lg transition-all duration-150 ${
               interactionMode === 'voice'
-                ? 'bg-[#003441] text-white shadow-sm'
-                : 'text-slate-500 hover:text-slate-900'
+                ? 'bg-primary text-primary-foreground border-transparent'
+                : 'text-muted-foreground hover:text-foreground hover:bg-muted'
             }`}
             title="No-Touch Mode (Voice Navigation)"
           >
-            <Mic className={`w-3 h-3 sm:w-3.5 sm:h-3.5 ${interactionMode === 'voice' ? 'text-emerald-300' : 'text-slate-400'}`} />
-            <span className="hidden xs:inline">No-Touch</span>
+            <Mic className="w-4 h-4" />
+            <span className="hidden xs:inline">{t('voice_mode')}</span>
           </button>
           
           <button
             type="button"
             onClick={() => handleModeChange('text')}
-            className={`flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1 text-[10px] sm:text-xs font-bold rounded-full transition-all duration-150 ${
+            className={`flex items-center gap-2 px-3 py-1.5 text-xs font-bold rounded-lg transition-all duration-150 ${
               interactionMode === 'text'
-                ? 'bg-[#003441] text-white shadow-sm'
-                : 'text-slate-500 hover:text-slate-900'
+                ? 'bg-primary text-primary-foreground border-transparent'
+                : 'text-muted-foreground hover:text-foreground hover:bg-muted'
             }`}
             title="Normal Mode (Standard Touch & Typing)"
           >
-            <MousePointer className={`w-3 h-3 sm:w-3.5 sm:h-3.5 ${interactionMode === 'text' ? 'text-slate-200' : 'text-slate-400'}`} />
-            <span className="hidden xs:inline">Normal</span>
+            <MousePointer className="w-4 h-4" />
+            <span className="hidden xs:inline">{t('normal_mode')}</span>
           </button>
         </div>
 
         {/* Intuitive Language Selector with Globe */}
-        <div className="relative flex items-center shrink-0">
-          <Globe className="w-3.5 h-3.5 text-slate-400 absolute left-2 pointer-events-none hidden sm:block" />
-          <select 
-            value={language}
-            onChange={handleLanguageChange}
-            className="bg-slate-50 border border-slate-200 text-slate-700 text-[10px] sm:text-sm font-semibold rounded-full sm:pl-7 pr-2.5 py-1 sm:py-1.5 focus:outline-none focus:ring-2 focus:ring-[#003441] focus:border-transparent cursor-pointer hover:border-slate-300 transition-colors max-w-[80px] sm:max-w-[140px] truncate"
-            aria-label="Select Language"
-          >
-            <option value="English">English</option>
-            <option value="Hindi">हिन्दी (Hindi)</option>
-            <option value="Bengali">বাংলা (Bengali)</option>
-            <option value="Gujarati">ગુજરાતી (Gujarati)</option>
-            <option value="Kannada">ಕನ್ನಡ (Kannada)</option>
-            <option value="Malayalam">മലയാളം (Malayalam)</option>
-            <option value="Marathi">मराठी (Marathi)</option>
-            <option value="Odia">ଓଡ଼ିଆ (Odia)</option>
-            <option value="Punjabi">ਪੰਜਾਬੀ (Punjabi)</option>
-            <option value="Tamil">தமிழ் (Tamil)</option>
-            <option value="Telugu">తెలుగు (Telugu)</option>
-          </select>
+        <div className="flex items-center shrink-0">
+          <Select value={language || "English"} onValueChange={(val) => handleLanguageChange({ target: { value: val }})}>
+            <SelectTrigger className="w-[120px] sm:w-[170px] bg-card border-border font-bold text-xs sm:text-sm">
+              <div className="flex items-center gap-2">
+                <Globe className="w-4 h-4 text-muted-foreground hidden sm:block shrink-0" />
+                <SelectValue placeholder="Language" />
+              </div>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="English">English</SelectItem>
+              <SelectItem value="Hindi">हिन्दी (Hindi)</SelectItem>
+              <SelectItem value="Bengali">বাংলা (Bengali)</SelectItem>
+              <SelectItem value="Gujarati">ગુજરાતી (Gujarati)</SelectItem>
+              <SelectItem value="Kannada">ಕನ್ನಡ (Kannada)</SelectItem>
+              <SelectItem value="Malayalam">മലയാളം (Malayalam)</SelectItem>
+              <SelectItem value="Marathi">मराठी (Marathi)</SelectItem>
+              <SelectItem value="Odia">ଓଡ଼ିଆ (Odia)</SelectItem>
+              <SelectItem value="Punjabi">ਪੰਜਾਬੀ (Punjabi)</SelectItem>
+              <SelectItem value="Tamil">தமிழ் (Tamil)</SelectItem>
+              <SelectItem value="Telugu">తెలుగు (Telugu)</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
 
         {/* User Account / Sign Out */}
         {session?.user && (
-          <div className="flex items-center gap-1 sm:gap-2 border-l border-slate-200 pl-1.5 sm:pl-3 shrink-0">
-            <span className="text-xs font-semibold text-slate-600 hidden lg:inline-block max-w-[100px] truncate">
-              {session.user.name}
-            </span>
-            <Button 
-              variant="ghost" 
-              size="sm" 
-              onClick={() => signOut({ callbackUrl: '/' })}
-              className="h-7 sm:h-8 px-1.5 sm:px-2.5 text-slate-600 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors"
-              title="Sign Out"
-            >
-              <LogOut className="w-3 h-3 sm:w-4 sm:h-4" />
-              <span className="hidden sm:inline-block text-xs font-semibold ml-1">Exit</span>
-            </Button>
+          <div className="flex items-center border-l border-border pl-4 shrink-0">
+            <DropdownMenu>
+              <DropdownMenuTrigger className="flex items-center justify-center w-10 h-10 rounded-full bg-primary text-primary-foreground font-bold text-lg hover:opacity-90 transition-opacity focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2">
+                {session.user.name.charAt(0).toUpperCase()}
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56 mt-2 p-2 rounded-lg border-border bg-card shadow-lg">
+                <DropdownMenuGroup>
+                  <DropdownMenuLabel className="flex flex-col space-y-1">
+                    <span className="text-sm font-bold text-foreground">{session.user.name}</span>
+                    <span className="text-xs font-mono text-muted-foreground truncate">{session.user.email}</span>
+                  </DropdownMenuLabel>
+                </DropdownMenuGroup>
+                <DropdownMenuSeparator className="bg-border my-2" />
+                <DropdownMenuItem 
+                  onClick={() => signOut({ callbackUrl: '/' })}
+                  className="text-destructive focus:bg-destructive/10 focus:text-destructive cursor-pointer rounded-md font-bold p-3"
+                >
+                  <LogOut className="mr-2 h-4 w-4" />
+                  <span>{t('sign_out')}</span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         )}
       </div>

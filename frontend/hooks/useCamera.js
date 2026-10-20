@@ -51,19 +51,6 @@ export function useCamera() {
         return;
       }
 
-      // Optional: turn on torch
-      const track = mediaStream.getVideoTracks()[0];
-      if (track?.getCapabilities) {
-        try {
-          const caps = track.getCapabilities();
-          if (caps.torch) {
-            await track.applyConstraints({ advanced: [{ torch: true }] });
-          }
-        } catch {
-          // torch not supported — ignore
-        }
-      }
-
       streamRef.current = mediaStream;
 
       // Attach to video element immediately if it's already in the DOM
@@ -88,11 +75,7 @@ export function useCamera() {
   const stopCamera = useCallback(() => {
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(t => {
-        try {
-          if (t.getCapabilities && t.getCapabilities().torch) {
-            t.applyConstraints({ advanced: [{ torch: false }] }).catch(() => {});
-          }
-        } catch(e) {}
+
         t.stop();
       });
       streamRef.current = null;

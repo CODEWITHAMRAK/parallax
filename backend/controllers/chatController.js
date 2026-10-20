@@ -1,4 +1,4 @@
-import { getLLMAction, getLLMActionStream } from "../services/llmService.js";
+import { getGeminiLLMAction, getGeminiLLMActionStream } from "../services/llmService.js";
 import User from "../models/User.js";
 
 export const handleChat = async (req, res) => {
@@ -19,7 +19,7 @@ export const handleChat = async (req, res) => {
 
     context.language = userLanguage;
 
-    const action = await getLLMAction(userInput, context);
+    const action = await getGeminiLLMAction(userInput, context);
     res.status(200).json(action);
   } catch (error) {
     console.error("Chat controller error:", error);
@@ -56,7 +56,13 @@ export const handleChatStream = async (req, res) => {
       res.write(`data: ${JSON.stringify({ type: 'sentence', text: sentence })}\n\n`);
     };
 
-    const action = await getLLMActionStream(userInput, context, onSentence);
+    // Wait for the full LLM response to complete
+    const action = await getGeminiLLMAction(userInput, context);
+    
+    // Send the full text as a single "sentence" so the frontend sends the full text to TTS
+    if (action.message) {
+      onSentence(action.message);
+    }
     
     // Send final action
     res.write(`data: ${JSON.stringify({ type: 'action', data: action })}\n\n`);

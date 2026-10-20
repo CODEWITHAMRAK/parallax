@@ -76,7 +76,10 @@ export const executeAction = (action, router) => {
 
     case ACTIONS.NAVIGATE_STEP:
       if (!schema) return navStore.setSystemMessage(t('no_active_form'));
-      const stepIndex = schema.steps.findIndex(s => s.id === action.target);
+      let stepIndex = schema.steps.findIndex(s => s.id === action.target);
+      if (action.target === 'review_step') {
+        stepIndex = schema.steps.length;
+      }
       if (stepIndex !== -1) {
         // Prevent jumping forward if current step has missing required fields
         if (stepIndex > navStore.currentStepIndex) {
