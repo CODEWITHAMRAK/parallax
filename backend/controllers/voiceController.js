@@ -13,7 +13,8 @@ export const transcribeAudio = async (req, res) => {
 
     const formData = new FormData();
     const blob = new Blob([req.file.buffer], { type: req.file.mimetype });
-    formData.append('file', blob, 'audio.webm');
+    const ext = req.file.mimetype.includes('mp4') ? 'mp4' : 'webm';
+    formData.append('file', blob, `audio.${ext}`);
 
     // Sarvam API STT model parameter
     formData.append('model', 'saaras:v3');

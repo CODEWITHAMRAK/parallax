@@ -38,33 +38,37 @@ export const executeAction = (action, router) => {
     });
   }
 
-  switch (action.action) {
+  const actionName = action.action?.trim()?.toUpperCase();
+
+  switch (actionName) {
     case 'CHAT':
       navStore.setSystemMessage(action.message || "I'm here to help.");
       break;
 
     case ACTIONS.NAVIGATE_PAGE:
-      if (action.target === 'home') {
-        navStore.setPage('home');
-        router.push('/home');
-        navStore.setSystemMessage(action.message || "Navigating home.");
-      } else if (action.target.includes('scholarship')) {
-        navStore.setPage('form');
-        router.push('/form/national_scholarship');
-        navStore.setSystemMessage(action.message || "Opening National Scholarship Form.", true);
-      } else if (action.target.includes('education') || action.target.includes('loan')) {
-        navStore.setPage('form');
-        router.push('/form/education_loan');
-        navStore.setSystemMessage(action.message || "Opening Education Loan Form.", true);
-      } else if (action.target.includes('bus') || action.target.includes('pass')) {
-        navStore.setPage('form');
-        router.push('/form/bus_pass');
-        navStore.setSystemMessage(action.message || "Opening Student Bus Pass Application.", true);
-      } else if (action.target) {
-        const cleanTarget = action.target.replace(/^\/form\//, '');
-        navStore.setPage('form');
-        router.push(`/form/${cleanTarget}`);
-        navStore.setSystemMessage(action.message || `Opening ${cleanTarget}.`, true);
+      if (action.target) {
+        const targetLower = action.target.toLowerCase();
+        if (targetLower === 'home') {
+          navStore.setPage('home');
+          router.push('/home');
+          navStore.setSystemMessage(action.message || "Navigating home.");
+        } else if (targetLower.includes('scholarship')) {
+          navStore.setPage('form');
+          router.push('/form/national_scholarship');
+          navStore.setSystemMessage(action.message || "Opening National Scholarship Form.", true);
+        } else if (targetLower.includes('education') || targetLower.includes('loan')) {
+          navStore.setPage('form');
+          router.push('/form/education_loan');
+          navStore.setSystemMessage(action.message || "Opening Education Loan Form.", true);
+        } else if (targetLower.includes('bus') || targetLower.includes('pass')) {
+          navStore.setPage('form');
+          router.push('/form/bus_pass');
+          navStore.setSystemMessage(action.message || "Opening Student Bus Pass Application.", true);
+        } else {
+          navStore.setPage('form');
+          router.push('/form/education_loan');
+          navStore.setSystemMessage(action.message || "Opening Education Loan Form.", true);
+        }
       } else {
         navStore.setSystemMessage(action.message || "Page not found.");
       }
@@ -164,14 +168,19 @@ export const executeAction = (action, router) => {
 
     case ACTIONS.OPEN_SCANNER:
       if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('trigger-scanner', { detail: { target: action.target } }));
+        let rawTarget = action.target || action.field || 'autofill';
+        if (rawTarget.toLowerCase() === 'autofill' || rawTarget.toLowerCase() === 'scanner') rawTarget = 'autofill';
+        window.dispatchEvent(new CustomEvent('trigger-scanner', { detail: { target: rawTarget } }));
       }
       if (action.message) navStore.setSystemMessage(action.message);
       break;
 
     case ACTIONS.OPEN_FILE_PICKER:
+    case ACTIONS.UPLOAD_DOCUMENT:
       if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('trigger-file-picker', { detail: { target: action.target } }));
+        let rawTarget = action.target || action.field || 'autofill';
+        if (rawTarget.toLowerCase() === 'autofill' || rawTarget.toLowerCase() === 'document') rawTarget = 'autofill';
+        window.dispatchEvent(new CustomEvent('trigger-file-picker', { detail: { target: rawTarget } }));
       }
       if (action.message) navStore.setSystemMessage(action.message);
       break;

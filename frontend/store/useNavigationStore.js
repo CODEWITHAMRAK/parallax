@@ -65,6 +65,15 @@ const useNavigationStore = create(
         });
       },
 
+      appendSystemMessage: (messageChunk) => {
+        set((state) => {
+          const newMsg = state.systemMessage && state.systemMessage !== "Loading..." && state.systemMessage !== "Processing..." 
+              ? state.systemMessage + " " + messageChunk 
+              : messageChunk;
+          return { systemMessage: newMsg };
+        });
+      },
+
       setLastAction: (actionType) => {
         set({ lastAction: actionType });
       },

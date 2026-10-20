@@ -192,6 +192,29 @@ export function useVoice() {
     audio.play().catch(e => console.error("Error playing precomputed audio:", e));
   }, [speak]);
 
+  const queueSpeak = useCallback((text, onPlaybackStart = null) => {
+    try {
+      setState(VoiceState.SPEAKING);
+      const currentLang = useNavigationStore.getState().language;
+      const langCode = LANG_MAP[currentLang] || 'en-IN';
+      voiceService.queueSpeak(text, langCode, onPlaybackStart);
+    } catch (err) {
+      console.error('Queue TTS Error:', err);
+    }
+  }, []);
+
+  const waitForSpeakQueue = useCallback(() => {
+    return new Promise((resolve) => {
+      const checkDone = setInterval(() => {
+        if (!voiceService.isProcessingTTSQueue) {
+          clearInterval(checkDone);
+          setState(prev => prev === VoiceState.SPEAKING ? VoiceState.IDLE : prev);
+          resolve();
+        }
+      }, 100);
+    });
+  }, []);
+
   return {
     state,
     transcribedText,
@@ -199,6 +222,8 @@ export function useVoice() {
     startListening,
     pauseListening, // renamed from stopListeningAndTranscribe as it no longer fetches manually
     speak,
+    queueSpeak,
+    waitForSpeakQueue,
     playSystemAudio,
     playScannerAudio,
     stopSpeaking,

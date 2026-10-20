@@ -59,16 +59,16 @@ Instructions:
 
 You MUST return ONLY valid JSON matching this exact schema:
 {
+  "message": "Step transition announcement first, then question for details, strictly in ${userLanguage}",
   "reasoning": "Brief verification...",
   "action": "ACTION_NAME",
   "filled_fields": {
     "optional_field_id": "extracted_value_in_ENGLISH"
   },
-  "target": "optional_target (e.g. for NAVIGATE_STEP, NAVIGATE_PAGE, CLEAR_FIELD)",
-  "message": "Step transition announcement first, then question for details, strictly in ${userLanguage}"
+  "target": "optional_target (e.g. for NAVIGATE_STEP, NAVIGATE_PAGE, CLEAR_FIELD)"
 }
 CRITICAL: For fields requiring specific formats (like "YYYY-MM-DD" for dates), you must format the extracted value strictly as requested. If the user provides multiple pieces of information, extract ALL of them into the "filled_fields" object (all in ENGLISH), even if your main action is NAVIGATE_STEP, NEXT, or CHAT. Your conversational 'message' MUST NEVER mention technical formats.
-CRITICAL: The "message" field MUST be the very LAST key in the JSON object, and do NOT use quotes inside the message string.`;
+CRITICAL: The "message" field MUST be the very FIRST key in the JSON object, and do NOT use quotes inside the message string.`;
 
   try {
     const chatHistory = context.chat_history || [];
@@ -173,15 +173,15 @@ Instructions:
 
 You MUST return ONLY valid JSON matching this schema:
 {
+  "message": "Step transition announcement first, then question for details, strictly in ${userLanguage}",
   "reasoning": "Brief verification (under 10 words)...",
   "action": "ACTION_NAME",
   "filled_fields": {
     "optional_field_id": "extracted_value_in_ENGLISH"
   },
-  "target": "optional_target",
-  "message": "Step transition announcement first, then question for details, strictly in ${userLanguage}"
+  "target": "optional_target"
 }
-CRITICAL: The "message" field MUST be the very LAST key in the JSON object, and do NOT use quotes inside the message string.`;
+CRITICAL: The "message" field MUST be the very FIRST key in the JSON object, and do NOT use quotes inside the message string.`;
 
   try {
     const chatHistory = context.chat_history || [];
